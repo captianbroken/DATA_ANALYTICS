@@ -151,4 +151,4 @@ The UI reads directly from Supabase tables, so any inserts/updates will reflect 
 - Must be logged in with a valid Supabase auth session, not fallback auth.
 
 ---
-If you need backend integration help, call out the exact table or API endpoint and I can document it more deeply.
+
