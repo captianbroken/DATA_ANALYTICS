@@ -9,6 +9,7 @@ ON CONFLICT (role_name) DO NOTHING;
 
 ALTER TABLE public.users
     ADD COLUMN IF NOT EXISTS auth_user_id UUID,
+    ADD COLUMN IF NOT EXISTS site_id INTEGER,
     ADD COLUMN IF NOT EXISTS last_login TIMESTAMPTZ;
 
 ALTER TABLE public.users
@@ -31,6 +32,20 @@ BEGIN
         ALTER TABLE public.users
             ADD CONSTRAINT users_auth_user_id_fkey
             FOREIGN KEY (auth_user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'users_site_id_fkey'
+          AND conrelid = 'public.users'::regclass
+    ) THEN
+        ALTER TABLE public.users
+            ADD CONSTRAINT users_site_id_fkey
+            FOREIGN KEY (site_id) REFERENCES public.sites(id) ON DELETE SET NULL;
     END IF;
 END $$;
 
@@ -84,7 +99,8 @@ CREATE OR REPLACE FUNCTION public.create_dashboard_user(
     p_email TEXT,
     p_password TEXT,
     p_role_name TEXT DEFAULT 'user',
-    p_status TEXT DEFAULT 'active'
+    p_status TEXT DEFAULT 'active',
+    p_site_id INTEGER DEFAULT NULL
 )
 RETURNS INTEGER
 LANGUAGE plpgsql
@@ -251,6 +267,7 @@ BEGIN
         email,
         password_hash,
         role_id,
+        site_id,
         status,
         is_deleted
     )
@@ -258,8 +275,9 @@ BEGIN
         v_auth_user_id,
         v_name,
         v_email,
-        'supabase_auth_managed',
+        crypt(trim(p_password), gen_salt('bf')),
         v_role_id,
+        p_site_id,
         v_status,
         FALSE
     )
@@ -269,6 +287,7 @@ BEGIN
         name = EXCLUDED.name,
         password_hash = EXCLUDED.password_hash,
         role_id = EXCLUDED.role_id,
+        site_id = EXCLUDED.site_id,
         status = EXCLUDED.status,
         is_deleted = FALSE;
 
@@ -287,7 +306,8 @@ CREATE OR REPLACE FUNCTION public.update_dashboard_user(
     p_email TEXT,
     p_password TEXT DEFAULT NULL,
     p_role_name TEXT DEFAULT 'user',
-    p_status TEXT DEFAULT 'active'
+    p_status TEXT DEFAULT 'active',
+    p_site_id INTEGER DEFAULT NULL
 )
 RETURNS INTEGER
 LANGUAGE plpgsql
@@ -435,8 +455,12 @@ BEGIN
         auth_user_id = v_auth_user_id,
         name = v_name,
         email = v_email,
-        password_hash = 'supabase_auth_managed',
+        password_hash = CASE
+            WHEN COALESCE(NULLIF(trim(p_password), ''), '') = '' THEN password_hash
+            ELSE crypt(trim(p_password), gen_salt('bf'))
+        END,
         role_id = v_role_id,
+        site_id = p_site_id,
         status = v_status,
         is_deleted = FALSE
     WHERE id = p_user_id;
@@ -475,6 +499,83 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.dashboard_login(
+    p_email TEXT,
+    p_password TEXT
+)
+RETURNS TABLE (
+    id INTEGER,
+    email TEXT,
+    name TEXT,
+    role TEXT,
+    site_id INTEGER,
+    status TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        u.id,
+        u.email::TEXT,
+        u.name::TEXT,
+        r.role_name::TEXT,
+        u.site_id,
+        u.status::TEXT
+    FROM public.users u
+    LEFT JOIN public.roles r ON r.id = u.role_id
+    WHERE lower(u.email) = lower(trim(p_email))
+      AND u.is_deleted = FALSE
+      AND u.status = 'active'
+      AND COALESCE(u.password_hash, '') <> ''
+      AND u.password_hash <> 'supabase_auth_managed'
+      AND u.password_hash = crypt(trim(p_password), u.password_hash)
+    LIMIT 1;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.change_dashboard_password(
+    p_user_id INTEGER,
+    p_password TEXT
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+DECLARE
+    v_auth_user_id UUID;
+BEGIN
+    IF COALESCE(trim(p_password), '') = '' THEN
+        RAISE EXCEPTION 'Password is required';
+    END IF;
+
+    UPDATE public.users
+    SET password_hash = crypt(trim(p_password), gen_salt('bf'))
+    WHERE id = p_user_id
+      AND is_deleted = FALSE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'User "%" was not found', p_user_id;
+    END IF;
+
+    SELECT auth_user_id
+    INTO v_auth_user_id
+    FROM public.users
+    WHERE id = p_user_id;
+
+    IF v_auth_user_id IS NOT NULL THEN
+        UPDATE auth.users
+        SET
+            encrypted_password = crypt(trim(p_password), gen_salt('bf')),
+            updated_at = NOW()
+        WHERE id = v_auth_user_id;
+    END IF;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION public.seed_admin_user(
     p_name TEXT DEFAULT 'Admin User',
     p_email TEXT DEFAULT 'admin@hyperspark.io',
@@ -488,22 +589,26 @@ AS $$
 DECLARE
     v_user_id INTEGER;
 BEGIN
-    SELECT public.create_dashboard_user(p_name, p_email, p_password, 'admin', 'active')
+    SELECT public.create_dashboard_user(p_name, p_email, p_password, 'admin', 'active', NULL)
     INTO v_user_id;
 
     RETURN v_user_id;
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.create_dashboard_user(TEXT, TEXT, TEXT, TEXT, TEXT) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.update_dashboard_user(INTEGER, TEXT, TEXT, TEXT, TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_dashboard_user(TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.update_dashboard_user(INTEGER, TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.soft_delete_dashboard_user(INTEGER) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.dashboard_login(TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.change_dashboard_password(INTEGER, TEXT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.seed_admin_user(TEXT, TEXT, TEXT) TO anon, authenticated;
 
 SELECT public.seed_admin_user('Admin User', 'admin@hyperspark.io', 'Admin@12345');
 
 -- Ensure API roles can read the schema and tables used by the dashboard.
-GRANT USAGE ON SCHEMA public TO anon, authenticated;
-GRANT SELECT ON public.roles TO anon, authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
+GRANT USAGE ON SCHEMA public TO anon, authenticated, authenticator;
+GRANT SELECT ON public.roles TO anon, authenticated, authenticator;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon, authenticated, authenticator;
+GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO anon, authenticated, authenticator;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT INSERT, UPDATE, DELETE ON TABLES TO authenticated;

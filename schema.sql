@@ -15,6 +15,15 @@ VALUES
     ('user', 'Limited standard user access')
 ON CONFLICT (role_name) DO NOTHING;
 
+CREATE TABLE IF NOT EXISTS sites (
+    id SERIAL PRIMARY KEY,
+    site_name VARCHAR(150) NOT NULL,
+    address TEXT,
+    description TEXT,
+    status VARCHAR(50) DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     auth_user_id UUID UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -22,18 +31,10 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(150) UNIQUE NOT NULL,
     password_hash VARCHAR(255) DEFAULT 'supabase_auth_managed',
     role_id INTEGER REFERENCES roles(id) ON DELETE SET NULL,
+    site_id INTEGER REFERENCES sites(id) ON DELETE SET NULL,
     status VARCHAR(50) DEFAULT 'active',
     is_deleted BOOLEAN DEFAULT FALSE,
     last_login TIMESTAMPTZ,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS sites (
-    id SERIAL PRIMARY KEY,
-    site_name VARCHAR(150) NOT NULL,
-    address TEXT,
-    description TEXT,
-    status VARCHAR(50) DEFAULT 'active',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
