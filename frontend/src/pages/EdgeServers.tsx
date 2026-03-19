@@ -3,14 +3,23 @@ import { useSearchParams } from 'react-router-dom';
 import { Plus, Search, Edit2, Trash2, Server, Wifi, WifiOff, Network, RefreshCw, Eye } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { FormActions, FormField, Modal } from '../components/ui/Modal';
+import { useAuth } from '../hooks/useAuth';
+import { selectUsersWithOptionalSite } from '../lib/userQueries';
 
 interface SiteRecord {
   id: number;
   site_name: string;
 }
 
+interface UserOption {
+  id: number;
+  name: string;
+  site_id?: number | null;
+}
+
 interface CameraLink {
   edge_server_id: number | null;
+  site_id: number | null;
 }
 
 interface EdgeServerRecord {
@@ -24,6 +33,7 @@ interface EdgeServerRecord {
   created_at: string;
   sites?: { site_name: string } | { site_name: string }[];
   camera_count?: number;
+  linked_users?: number;
 }
 
 const emptyForm = {
@@ -35,8 +45,12 @@ const emptyForm = {
 };
 
 const EdgeServersPage = () => {
+  const { appUser } = useAuth();
+  const isAdmin = appUser?.role === 'admin';
+  const assignedSiteId = appUser?.site_id ?? null;
   const [servers, setServers] = useState<EdgeServerRecord[]>([]);
   const [sites, setSites] = useState<SiteRecord[]>([]);
+  const [users, setUsers] = useState<UserOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
@@ -54,22 +68,48 @@ const EdgeServersPage = () => {
     setLoading(true);
     setError('');
 
-    const [{ data: serverData, error: serverError }, { data: siteData }, { data: cameraData }] = await Promise.all([
-      supabase
-        .from('edge_servers')
-        .select('id, site_id, server_name, ip_address, mac_address, status, is_deleted, created_at, sites(site_name)')
-        .eq('is_deleted', false)
-        .order('created_at', { ascending: false }),
-      supabase.from('sites').select('id, site_name').order('site_name'),
-      supabase.from('cameras').select('edge_server_id').eq('is_deleted', false),
+    if (!isAdmin && !assignedSiteId) {
+      setServers([]);
+      setSites([]);
+      setUsers([]);
+      setLoading(false);
+      return;
+    }
+
+    let serverQuery = supabase
+      .from('edge_servers')
+      .select('id, site_id, server_name, ip_address, mac_address, status, is_deleted, created_at, sites(site_name)')
+      .eq('is_deleted', false)
+      .order('created_at', { ascending: false });
+    let siteQuery = supabase.from('sites').select('id, site_name').order('site_name');
+    let cameraQuery = supabase.from('cameras').select('edge_server_id, site_id').eq('is_deleted', false);
+
+    if (!isAdmin && assignedSiteId) {
+      serverQuery = serverQuery.eq('site_id', assignedSiteId);
+      siteQuery = siteQuery.eq('id', assignedSiteId);
+      cameraQuery = cameraQuery.eq('site_id', assignedSiteId);
+    }
+
+    const [{ data: serverData, error: serverError }, { data: siteData }, { data: cameraData }, usersResult] = await Promise.all([
+      serverQuery,
+      siteQuery,
+      cameraQuery,
+      isAdmin
+        ? selectUsersWithOptionalSite<UserOption>('id, name, site_id', 'id, name', query => query.eq('is_deleted', false).not('site_id', 'is', null).order('name'))
+        : Promise.resolve({ data: [], error: null, siteAssignmentAvailable: true }),
     ]);
 
     if (serverError) setError(serverError.message);
 
     const counts = new Map<number, number>();
+    const usersBySite = new Map<number, number>();
     (cameraData as CameraLink[] | null)?.forEach(camera => {
       if (!camera.edge_server_id) return;
       counts.set(camera.edge_server_id, (counts.get(camera.edge_server_id) ?? 0) + 1);
+    });
+    (usersResult.data as { site_id?: number | null }[] | null)?.forEach(user => {
+      if (!user.site_id) return;
+      usersBySite.set(user.site_id, (usersBySite.get(user.site_id) ?? 0) + 1);
     });
 
     if (serverData) {
@@ -77,13 +117,15 @@ const EdgeServersPage = () => {
         ((serverData as unknown) as EdgeServerRecord[]).map(server => ({
           ...server,
           camera_count: counts.get(server.id) ?? 0,
+          linked_users: server.site_id ? (usersBySite.get(server.site_id) ?? 0) : 0,
         })),
       );
     }
 
     if (siteData) setSites(siteData as SiteRecord[]);
+    setUsers((usersResult.data as UserOption[] | null) ?? []);
     setLoading(false);
-  }, []);
+  }, [assignedSiteId, isAdmin]);
 
   const getSiteName = (siteRelation: EdgeServerRecord['sites']) =>
     Array.isArray(siteRelation) ? (siteRelation[0]?.site_name ?? '-') : (siteRelation?.site_name ?? '-');
@@ -102,14 +144,17 @@ const EdgeServersPage = () => {
     const value = (searchParams.get('status') || '').toLowerCase();
     return value === 'active' || value === 'inactive' ? value : '';
   }, [searchParams]);
+  const selectedUserId = searchParams.get('user') ?? '';
 
   const filtered = servers.filter(server => {
+    const selectedUser = users.find(user => String(user.id) === selectedUserId);
     const matchSearch =
       server.server_name.toLowerCase().includes(search.toLowerCase()) ||
       getSiteName(server.sites).toLowerCase().includes(search.toLowerCase()) ||
       (server.ip_address ?? '').toLowerCase().includes(search.toLowerCase());
     const matchStatus = !statusFilter || server.status === statusFilter;
-    return matchSearch && matchStatus;
+    const matchUser = !selectedUser || server.site_id === selectedUser.site_id;
+    return matchSearch && matchStatus && matchUser;
   });
 
   const closeForms = () => {
@@ -120,7 +165,7 @@ const EdgeServersPage = () => {
   };
 
   const buildPayload = () => ({
-    site_id: form.site_id ? Number(form.site_id) : null,
+    site_id: isAdmin ? (form.site_id ? Number(form.site_id) : null) : assignedSiteId,
     server_name: form.server_name.trim(),
     ip_address: form.ip_address.trim() || null,
     mac_address: form.mac_address.trim() || null,
@@ -188,7 +233,7 @@ const EdgeServersPage = () => {
     setSaving(false);
   };
 
-  const ServerForm = ({ onSubmit }: { onSubmit: (event: React.FormEvent) => void }) => (
+  const renderServerForm = (onSubmit: (event: React.FormEvent) => void) => (
     <form onSubmit={onSubmit} className="space-y-4">
       {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-lg">{error}</p>}
       <FormField
@@ -238,7 +283,9 @@ const EdgeServersPage = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Edge Servers</h1>
-          <p className="text-slate-500 text-sm mt-1">Manage on-premise AI inference servers</p>
+          <p className="text-slate-500 text-sm mt-1">
+            {isAdmin ? 'Manage on-premise AI inference servers' : 'Manage edge servers for your assigned site'}
+          </p>
         </div>
         <div className="flex gap-2">
           <button
@@ -250,7 +297,7 @@ const EdgeServersPage = () => {
           </button>
           <button
             onClick={() => {
-              setForm(emptyForm);
+              setForm({ ...emptyForm, site_id: assignedSiteId ? String(assignedSiteId) : '' });
               setError('');
               setShowAdd(true);
             }}
@@ -293,6 +340,25 @@ const EdgeServersPage = () => {
           >
             Status: {statusFilter === 'active' ? 'Online' : 'Offline'} x
           </button>
+        )}
+        {isAdmin && users.length > 0 && (
+          <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm">
+            <span className="text-xs text-slate-400 uppercase tracking-wide">User</span>
+            <select value={selectedUserId} onChange={event => {
+              const params = new URLSearchParams(searchParams);
+              if (event.target.value) params.set('user', event.target.value);
+              else params.delete('user');
+              setSearchParams(params);
+            }} className="text-slate-700 text-sm bg-transparent outline-none">
+              <option value="">All</option>
+              {users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}
+            </select>
+          </div>
+        )}
+        {isAdmin && users.length === 0 && (
+          <span className="text-xs text-amber-600 bg-amber-50 border border-amber-100 px-3 py-2 rounded-lg">
+            Assign a site to a user in Users before filtering by user.
+          </span>
         )}
         <span className="text-xs text-slate-500 bg-slate-100 px-3 py-2 rounded-lg">{filtered.length} servers</span>
       </div>
@@ -339,6 +405,12 @@ const EdgeServersPage = () => {
                     <p className="text-slate-400 mb-1">Connected Cameras</p>
                     <p className="font-bold text-slate-700">{server.camera_count ?? 0}</p>
                   </div>
+                  {isAdmin && (
+                    <div className="bg-slate-50 rounded-lg p-3">
+                      <p className="text-slate-400 mb-1">User Access</p>
+                      <p className="font-bold text-slate-700">{server.linked_users ?? 0}</p>
+                    </div>
+                  )}
                   <div className="bg-slate-50 rounded-lg p-3 col-span-2">
                     <p className="text-slate-400 mb-1 flex items-center gap-1">
                       <Network size={10} /> MAC Address
@@ -391,7 +463,7 @@ const EdgeServersPage = () => {
       )}
 
       <Modal isOpen={showAdd} onClose={closeForms} title="Add Edge Server">
-        <ServerForm onSubmit={handleAdd} />
+        {renderServerForm(handleAdd)}
       </Modal>
 
       <Modal isOpen={showView} onClose={() => setShowView(false)} title="Edge Server Details">
@@ -404,6 +476,7 @@ const EdgeServersPage = () => {
               ['MAC Address', selected.mac_address ?? '-'],
               ['Status', selected.status === 'active' ? 'Online' : 'Offline'],
               ['Connected Cameras', String(selected.camera_count ?? 0)],
+              ...(isAdmin ? [['Users With Access', String(selected.linked_users ?? 0)] as [string, string]] : []),
             ].map(([label, value]) => (
               <div key={label} className="bg-slate-50 p-3 rounded-lg">
                 <p className="text-xs text-slate-400 uppercase tracking-wide font-medium mb-1">{label}</p>
@@ -415,7 +488,7 @@ const EdgeServersPage = () => {
       </Modal>
 
       <Modal isOpen={showEdit} onClose={closeForms} title={`Edit: ${selected?.server_name}`}>
-        <ServerForm onSubmit={handleEdit} />
+        {renderServerForm(handleEdit)}
       </Modal>
 
       <Modal isOpen={showDelete} onClose={() => setShowDelete(false)} title="Remove Edge Server" maxWidth="max-w-sm">

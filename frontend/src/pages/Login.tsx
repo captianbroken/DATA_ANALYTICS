@@ -54,64 +54,28 @@ const Login = () => {
     event.preventDefault();
     setLoading(true);
     setError(null);
+    setDebugInfo(null);
 
     try {
+      // Clear any stale fallback session before a new login attempt.
+      localStorage.removeItem('hyperspark_user');
+      localStorage.removeItem('hyperspark_fallback_auth');
+      sessionStorage.removeItem('hyperspark_session');
+
       if (!isSupabaseConfigured) {
         throw new Error('The root .env file must contain a valid VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY. Update it and restart the app.');
       }
 
-      const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+      const { data: loginRows, error: loginError } = await supabase.rpc('dashboard_login', {
+        p_email: email.trim().toLowerCase(),
+        p_password: password,
+      });
 
-      let userEmail = email;
-
-      // Fallback for AuthApiError "unexpected_failure" on fresh Supabase instances lacking full schema grants
-      if (authError) {
-        if (authError.message.includes('unexpected_failure') || authError.code === 'unexpected_failure') {
-          console.warn('Supabase Auth failed with unexpected_failure. Falling back to direct public.users check.');
-          const { data: fallbackUser, error: fallbackError } = await supabase
-            .from('users')
-            .select('email, password_hash')
-            .eq('email', email)
-            .single();
-            
-          if (fallbackError || !fallbackUser) {
-             throw new Error('Invalid login credentials.');
-          }
-          userEmail = fallbackUser.email;
-        } else {
-          throw authError;
-        }
-      } else if (!data.user) {
-        throw new Error('No user returned.');
+      if (loginError) throw loginError;
+      const appUser = Array.isArray(loginRows) ? loginRows[0] : loginRows;
+      if (!appUser) {
+        throw new Error('Invalid email or password.');
       }
-
-      const { data: appUser, error: dbError } = await supabase
-        .from('users')
-        .select('id, name, email, status, is_deleted, roles(role_name)')
-        .eq('email', userEmail)
-        .eq('is_deleted', false)
-        .single();
-
-      if (dbError || !appUser) {
-        await supabase.auth.signOut();
-        throw new Error('Access denied. Your account is not registered in the system.');
-      }
-
-      if (appUser.status === 'inactive') {
-        await supabase.auth.signOut();
-        throw new Error('Your account has been deactivated. Contact your administrator.');
-      }
-
-      // Extract role name consistently with useAuth.ts
-      const roleName = Array.isArray(appUser?.roles)
-        ? appUser.roles[0]?.role_name
-        : ((appUser?.roles ?? null) as unknown as { role_name?: string } | null)?.role_name;
-
-      const userWithRole = {
-        ...appUser,
-        email: appUser.email ?? userEmail,
-        role: roleName || 'user'
-      };
 
       // We only update last_login if auth actually gave us an active session,
       // but we can try updating it anyway.
@@ -120,18 +84,24 @@ const Login = () => {
         .update({ last_login: new Date().toISOString() })
         .eq('id', appUser.id);
 
-      // Force navigating to dashboard, simulating a successful login
-      // Note: If Supabase auth failed, API requests requiring authentication might still fail.
-      // This fallback assumes the VITE_SUPABASE_ANON_KEY provides sufficient access to the dashboard.
-      // A more robust solution is required if RLS is strictly enforced, but currently RLS is disabled on public tables.
+      sessionStorage.setItem('hyperspark_session', JSON.stringify({
+        user: { email: appUser.email },
+        created_at: new Date().toISOString(),
+        app_user: {
+          id: appUser.id,
+          email: appUser.email,
+          name: appUser.name,
+          role: appUser.role,
+          site_id: appUser.site_id ?? null,
+          status: appUser.status,
+        },
+      }));
       
-      // We set a local storage flag so the app knows it's a fallback session if needed, 
-      // but for MVP dashboard where RLS is off, navigating should work.
-      localStorage.setItem('hyperspark_fallback_auth', 'true');
-      localStorage.setItem('hyperspark_user', JSON.stringify(userWithRole));
-      
-      navigate('/');
+      navigate('/', { replace: true });
     } catch (err: any) {
+      localStorage.removeItem('hyperspark_user');
+      localStorage.removeItem('hyperspark_fallback_auth');
+      sessionStorage.removeItem('hyperspark_session');
       setError(toFriendlyError(err));
       captureDebugInfo(err);
       console.error('Login error:', err);

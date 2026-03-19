@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { Plus, Search, Eye, Edit2, Trash2, UserCheck, UserX, RefreshCw, FolderOpen } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Modal, FormField, FormActions } from '../components/ui/Modal';
+import { useAuth } from '../hooks/useAuth';
+import { selectUsersWithOptionalSite } from '../lib/userQueries';
 
 interface Employee {
   id: number;
@@ -17,17 +19,23 @@ interface Employee {
   face_registered?: boolean;
   has_spectacles?: boolean;
   face_image_paths?: string[] | null;
+  linked_users?: number;
 }
 
 interface Site { id: number; site_name: string; }
+interface UserOption { id: number; name: string; site_id?: number | null; }
 
 const FACE_BUCKET = 'employee-faces';
 
 const emptyForm = { name: '', employee_code: '', department: '', designation: '', site_id: '', has_spectacles: '' };
 
 const EmployeesPage = () => {
+  const { appUser } = useAuth();
+  const isAdmin = appUser?.role === 'admin';
+  const assignedSiteId = appUser?.site_id ?? null;
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
+  const [users, setUsers] = useState<UserOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
@@ -53,7 +61,8 @@ const EmployeesPage = () => {
     employee_code: form.employee_code.trim(),
     department: form.department.trim(),
     designation: form.designation.trim(),
-    site_id: form.site_id ? Number(form.site_id) : null,
+    site_id: isAdmin ? (form.site_id ? Number(form.site_id) : null) : assignedSiteId,
+    created_by: appUser?.id ?? null,
     has_spectacles: form.has_spectacles === 'yes',
   });
 
@@ -83,16 +92,49 @@ const EmployeesPage = () => {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
-    const [{ data: empData, error: empError }, { data: siteData }] = await Promise.all([
-      supabase.from('employees').select('*, sites(site_name)').eq('is_deleted', false).order('name'),
-      supabase.from('sites').select('id, site_name').order('site_name'),
+    setError('');
+
+    if (!isAdmin && !assignedSiteId) {
+      setEmployees([]);
+      setSites([]);
+      setUsers([]);
+      setLoading(false);
+      return;
+    }
+
+    let employeeQuery = supabase.from('employees').select('*, sites(site_name)').eq('is_deleted', false).order('name');
+    let siteQuery = supabase.from('sites').select('id, site_name').order('site_name');
+
+    if (!isAdmin && assignedSiteId) {
+      employeeQuery = employeeQuery.eq('site_id', assignedSiteId);
+      siteQuery = siteQuery.eq('id', assignedSiteId);
+    }
+
+    const [{ data: empData, error: empError }, { data: siteData }, usersResult] = await Promise.all([
+      employeeQuery,
+      siteQuery,
+      isAdmin
+        ? selectUsersWithOptionalSite<UserOption>('id, name, site_id', 'id, name', query => query.eq('is_deleted', false).not('site_id', 'is', null).order('name'))
+        : Promise.resolve({ data: [], error: null, siteAssignmentAvailable: true }),
     ]);
 
     if (empError) setError(empError.message);
-    if (empData) setEmployees(empData as Employee[]);
+    if (empData) {
+      const usersBySite = new Map<number, number>();
+      (usersResult.data as { site_id?: number | null }[] | null)?.forEach(user => {
+        if (!user.site_id) return;
+        usersBySite.set(user.site_id, (usersBySite.get(user.site_id) ?? 0) + 1);
+      });
+
+      setEmployees((empData as Employee[]).map(employee => ({
+        ...employee,
+        linked_users: employee.site_id ? (usersBySite.get(employee.site_id) ?? 0) : 0,
+      })));
+    }
     if (siteData) setSites(siteData as Site[]);
+    setUsers((usersResult.data as UserOption[] | null) ?? []);
     setLoading(false);
-  }, []);
+  }, [assignedSiteId, isAdmin]);
 
   useEffect(() => {
     fetchAll();
@@ -104,11 +146,17 @@ const EmployeesPage = () => {
     }
   }, [queryParam]);
 
-  const filtered = employees.filter(employee =>
-    employee.name.toLowerCase().includes(search.toLowerCase()) ||
-    (employee.employee_code ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (employee.department ?? '').toLowerCase().includes(search.toLowerCase()),
-  );
+  const selectedUserId = searchParams.get('user') ?? '';
+
+  const filtered = employees.filter(employee => {
+    const selectedUser = users.find(user => String(user.id) === selectedUserId);
+    const matchSearch =
+      employee.name.toLowerCase().includes(search.toLowerCase()) ||
+      (employee.employee_code ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (employee.department ?? '').toLowerCase().includes(search.toLowerCase());
+    const matchUser = !selectedUser || employee.site_id === selectedUser.site_id;
+    return matchSearch && matchUser;
+  });
 
   const closeForms = () => {
     setShowAdd(false);
@@ -227,7 +275,7 @@ const EmployeesPage = () => {
     setSaving(false);
   };
 
-  const EmpForm = ({ onSubmit }: { onSubmit: (event: React.FormEvent) => void }) => {
+  const renderEmpForm = (onSubmit: (event: React.FormEvent) => void) => {
     const requiredCount = form.has_spectacles === 'yes' ? 4 : 3;
 
     return (
@@ -300,13 +348,15 @@ const EmployeesPage = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Employees</h1>
-          <p className="text-slate-500 text-sm mt-1">Register personnel for face recognition and PPE monitoring</p>
+          <p className="text-slate-500 text-sm mt-1">
+            {isAdmin ? 'Register personnel for face recognition and PPE monitoring' : 'Manage employees for your assigned site'}
+          </p>
         </div>
         <div className="flex gap-2">
           <button onClick={fetchAll} className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
           </button>
-          <button onClick={() => { setForm(emptyForm); setError(''); resetFaceUploads(); setShowAdd(true); }} style={{ backgroundColor: '#005baa' }} className="text-white px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-medium hover:opacity-90 shadow-sm">
+          <button onClick={() => { setForm({ ...emptyForm, site_id: assignedSiteId ? String(assignedSiteId) : '' }); setError(''); resetFaceUploads(); setShowAdd(true); }} style={{ backgroundColor: '#005baa' }} className="text-white px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-medium hover:opacity-90 shadow-sm">
             <Plus size={16} /> Add Employee
           </button>
         </div>
@@ -332,6 +382,25 @@ const EmployeesPage = () => {
             className="w-full pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
           />
         </div>
+        {isAdmin && users.length > 0 && (
+          <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm">
+            <span className="text-xs text-slate-400 uppercase tracking-wide">User</span>
+            <select value={selectedUserId} onChange={event => {
+              const params = new URLSearchParams(searchParams);
+              if (event.target.value) params.set('user', event.target.value);
+              else params.delete('user');
+              setSearchParams(params);
+            }} className="text-slate-700 text-sm bg-transparent outline-none">
+              <option value="">All</option>
+              {users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}
+            </select>
+          </div>
+        )}
+        {isAdmin && users.length === 0 && (
+          <span className="text-xs text-amber-600 bg-amber-50 border border-amber-100 px-3 py-2 rounded-lg">
+            Assign a site to a user in Users before filtering by user.
+          </span>
+        )}
         <span className="text-xs text-slate-500 bg-slate-100 px-3 py-2 rounded-lg">{filtered.length} employees</span>
       </div>
 
@@ -347,6 +416,7 @@ const EmployeesPage = () => {
                 <th className="px-5 py-3 font-medium">Employee</th>
                 <th className="px-5 py-3 font-medium">ID / Dept</th>
                 <th className="px-5 py-3 font-medium">Site</th>
+                {isAdmin && <th className="px-5 py-3 font-medium text-center">User Access</th>}
                 <th className="px-5 py-3 font-medium text-center">FRS Status</th>
                 <th className="px-5 py-3 font-medium text-right">Actions</th>
               </tr>
@@ -370,6 +440,7 @@ const EmployeesPage = () => {
                     <p className="text-xs text-slate-400 mt-0.5">{employee.department || '-'}</p>
                   </td>
                   <td className="px-5 py-4 text-slate-500 text-xs">{employee.sites?.site_name || '-'}</td>
+                  {isAdmin && <td className="px-5 py-4 text-center text-xs font-medium text-blue-700">{employee.linked_users ?? 0}</td>}
                   <td className="px-5 py-4 text-center">
                     {employee.face_registered
                       ? <span className="inline-flex items-center gap-1 text-green-600 text-xs font-medium"><UserCheck size={13} />Enrolled</span>
@@ -389,7 +460,7 @@ const EmployeesPage = () => {
         )}
       </div>
 
-      <Modal isOpen={showAdd} onClose={closeForms} title="Add Employee"><EmpForm onSubmit={handleAdd} /></Modal>
+      <Modal isOpen={showAdd} onClose={closeForms} title="Add Employee">{renderEmpForm(handleAdd)}</Modal>
       <Modal isOpen={showView} onClose={() => setShowView(false)} title="Employee Details">
         {selected && (
           <div className="space-y-3">
@@ -407,6 +478,7 @@ const EmployeesPage = () => {
                 ['Employee ID', selected.employee_code ?? '-'],
                 ['Department', selected.department ?? '-'],
                 ['Site', selected.sites?.site_name ?? '-'],
+                ...(isAdmin ? [['Users With Access', String(selected.linked_users ?? 0)] as [string, string]] : []),
                 ['FRS Status', selected.face_registered ? 'Enrolled' : 'Not Enrolled'],
                 ['Spectacles', selected.has_spectacles ? 'Yes' : 'No'],
                 ['Photos', Array.isArray(selected.face_image_paths) ? String(selected.face_image_paths.length) : '0'],
@@ -420,7 +492,7 @@ const EmployeesPage = () => {
           </div>
         )}
       </Modal>
-      <Modal isOpen={showEdit} onClose={closeForms} title={`Edit: ${selected?.name}`}><EmpForm onSubmit={handleEdit} /></Modal>
+      <Modal isOpen={showEdit} onClose={closeForms} title={`Edit: ${selected?.name}`}>{renderEmpForm(handleEdit)}</Modal>
       <Modal isOpen={showDelete} onClose={() => setShowDelete(false)} title="Remove Employee" maxWidth="max-w-sm">
         <div className="text-center space-y-4">
           <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto"><Trash2 size={24} className="text-red-500" /></div>

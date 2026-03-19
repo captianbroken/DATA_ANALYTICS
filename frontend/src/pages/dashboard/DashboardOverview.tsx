@@ -308,6 +308,7 @@ const DashboardOverview = () => {
   const normalizedQuery = useMemo(() => (searchParams.get('q') ?? '').trim().toLowerCase(), [searchParams]);
   const { appUser } = useAuth();
   const isAdmin = appUser?.role === 'admin';
+  const assignedSiteId = appUser?.site_id ?? null;
 
   const dateRange = useMemo(() => getDateRange(timeRange, customStart, customEnd), [timeRange, customStart, customEnd]);
   const startDate = useMemo(() => dateRange.start.toISOString(), [dateRange]);
@@ -368,6 +369,17 @@ const DashboardOverview = () => {
       setLoading(true);
 
       try {
+        if (!isAdmin && !assignedSiteId) {
+          setCounts(emptyCounts);
+          return;
+        }
+
+        const sitesCountQuery = isAdmin
+          ? supabase.from('sites').select('*', { count: 'exact', head: true })
+          : supabase.from('sites').select('*', { count: 'exact', head: true }).eq('id', assignedSiteId as number);
+        const usersCountQuery = isAdmin
+          ? supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_deleted', false)
+          : supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number);
         const [
           { count: sitesCount },
           { count: usersCount },
@@ -382,18 +394,38 @@ const DashboardOverview = () => {
           { count: unknownFacesCount },
           { count: violationsCount },
         ] = await Promise.all([
-          supabase.from('sites').select('*', { count: 'exact', head: true }),
-          supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_deleted', false),
-          supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false),
-          supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('status', 'active'),
-          supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('status', 'inactive'),
-          supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false),
-          supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('status', 'active'),
-          supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('status', 'inactive'),
-          supabase.from('employees').select('*', { count: 'exact', head: true }).eq('is_deleted', false),
-          supabase.from('events').select('event_type').gte('event_time', startDate).lte('event_time', endDate),
-          supabase.from('events').select('*', { count: 'exact', head: true }).gte('event_time', startDate).lte('event_time', endDate).is('employee_id', null),
-          supabase.from('violations').select('*', { count: 'exact', head: true }).gte('timestamp', startDate).lte('timestamp', endDate),
+          sitesCountQuery,
+          usersCountQuery,
+          (isAdmin
+            ? supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false)
+            : supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number)),
+          (isAdmin
+            ? supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('status', 'active')
+            : supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number).eq('status', 'active')),
+          (isAdmin
+            ? supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('status', 'inactive')
+            : supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number).eq('status', 'inactive')),
+          (isAdmin
+            ? supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false)
+            : supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number)),
+          (isAdmin
+            ? supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('status', 'active')
+            : supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number).eq('status', 'active')),
+          (isAdmin
+            ? supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('status', 'inactive')
+            : supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number).eq('status', 'inactive')),
+          (isAdmin
+            ? supabase.from('employees').select('*', { count: 'exact', head: true }).eq('is_deleted', false)
+            : supabase.from('employees').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number)),
+          (isAdmin
+            ? supabase.from('events').select('event_type').gte('event_time', startDate).lte('event_time', endDate)
+            : supabase.from('events').select('event_type').eq('site_id', assignedSiteId as number).gte('event_time', startDate).lte('event_time', endDate)),
+          (isAdmin
+            ? supabase.from('events').select('*', { count: 'exact', head: true }).gte('event_time', startDate).lte('event_time', endDate).is('employee_id', null)
+            : supabase.from('events').select('*', { count: 'exact', head: true }).eq('site_id', assignedSiteId as number).gte('event_time', startDate).lte('event_time', endDate).is('employee_id', null)),
+          (isAdmin
+            ? supabase.from('violations').select('id, cameras!inner(site_id)', { count: 'exact', head: true }).gte('timestamp', startDate).lte('timestamp', endDate)
+            : supabase.from('violations').select('id, cameras!inner(site_id)', { count: 'exact', head: true }).gte('timestamp', startDate).lte('timestamp', endDate).eq('cameras.site_id', assignedSiteId as number)),
         ]);
 
         const categoryCounts = { FRS: 0, PPE: 0, OTHER: 0 };
@@ -431,27 +463,46 @@ const DashboardOverview = () => {
       setChartLoading(true);
 
       try {
+        if (!isAdmin && !assignedSiteId) {
+          setChartData(buildEmptyBuckets(timeRange, dateRange.start, dateRange.end));
+          setRecentEvents([]);
+          setRecentViolations([]);
+          return;
+        }
+
         const buckets = buildEmptyBuckets(timeRange, dateRange.start, dateRange.end);
         const bucketMap: Record<string, ChartPoint> = {};
         buckets.forEach(bucket => { bucketMap[bucket.time] = { ...bucket }; });
 
+        let eventsRawQuery = supabase.from('events').select('id, event_time, event_type').gte('event_time', startDate).lte('event_time', endDate).order('event_time', { ascending: true });
+        let violationsRawQuery = supabase.from('violations').select('id, timestamp, cameras!inner(site_id)').gte('timestamp', startDate).lte('timestamp', endDate).order('timestamp', { ascending: true });
+        let recentEventsQuery = supabase
+          .from('events')
+          .select('id, event_time, event_type, confidence_score, cameras(camera_name, sites(site_name)), employees(name)')
+          .gte('event_time', startDate)
+          .lte('event_time', endDate)
+          .order('event_time', { ascending: false })
+          .limit(8);
+        let recentViolationsQuery = supabase
+          .from('violations')
+          .select('id, timestamp, violation_type, status, cameras!inner(site_id, camera_name, sites(site_name)), employees(name)')
+          .gte('timestamp', startDate)
+          .lte('timestamp', endDate)
+          .order('timestamp', { ascending: false })
+          .limit(8);
+
+        if (!isAdmin && assignedSiteId) {
+          eventsRawQuery = eventsRawQuery.eq('site_id', assignedSiteId);
+          violationsRawQuery = violationsRawQuery.eq('cameras.site_id', assignedSiteId);
+          recentEventsQuery = recentEventsQuery.eq('site_id', assignedSiteId);
+          recentViolationsQuery = recentViolationsQuery.eq('cameras.site_id', assignedSiteId);
+        }
+
         const [{ data: eventsRaw }, { data: violationsRaw }, { data: recentEventsRaw }, { data: recentViolationsRaw }] = await Promise.all([
-          supabase.from('events').select('id, event_time, event_type').gte('event_time', startDate).lte('event_time', endDate).order('event_time', { ascending: true }),
-          supabase.from('violations').select('id, timestamp').gte('timestamp', startDate).lte('timestamp', endDate).order('timestamp', { ascending: true }),
-          supabase
-            .from('events')
-            .select('id, event_time, event_type, confidence_score, cameras(camera_name, sites(site_name)), employees(name)')
-            .gte('event_time', startDate)
-            .lte('event_time', endDate)
-            .order('event_time', { ascending: false })
-            .limit(8),
-          supabase
-            .from('violations')
-            .select('id, timestamp, violation_type, status, cameras(camera_name, sites(site_name)), employees(name)')
-            .gte('timestamp', startDate)
-            .lte('timestamp', endDate)
-            .order('timestamp', { ascending: false })
-            .limit(8),
+          eventsRawQuery,
+          violationsRawQuery,
+          recentEventsQuery,
+          recentViolationsQuery,
         ]);
 
         (eventsRaw ?? []).forEach((event: { event_time: string; event_type?: string | null }) => {
@@ -479,7 +530,7 @@ const DashboardOverview = () => {
 
     fetchStats();
     fetchCharts();
-  }, [startDate, endDate, timeRange, modelFilter, dateRange]);
+  }, [assignedSiteId, dateRange, endDate, isAdmin, modelFilter, startDate, timeRange]);
 
   const handleExport = () => {
     const data = [
@@ -525,8 +576,10 @@ const DashboardOverview = () => {
     <div className="space-y-6" onClick={() => setShowDropdown(false)}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">System Dashboard</h1>
-          <p className="text-slate-500 text-sm mt-1">Real-time overview with live counts from your database</p>
+          <h1 className="text-2xl font-bold text-slate-800">{isAdmin ? 'System Dashboard' : 'Site Dashboard'}</h1>
+          <p className="text-slate-500 text-sm mt-1">
+            {isAdmin ? 'Real-time overview with live counts from your database' : 'Real-time overview for your assigned site'}
+          </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap" onClick={event => event.stopPropagation()}>
           <div className="relative">
@@ -584,24 +637,18 @@ const DashboardOverview = () => {
             <NavCard title="Total Users" value={counts.users} loading={loading} icon={Users} color="bg-indigo-500" to="/users" />
           )}
           <NavCard title="Total Cameras" value={counts.cameras} loading={loading} icon={Camera} color="bg-indigo-500" to="/cameras" />
-          {isAdmin && (
-            <NavCard title="Edge Servers" value={counts.edge_servers} loading={loading} icon={Server} color="bg-sky-500" to="/edge-servers" />
-          )}
+          <NavCard title="Edge Servers" value={counts.edge_servers} loading={loading} icon={Server} color="bg-sky-500" to="/edge-servers" />
           <NavCard title="Employees" value={counts.employees} loading={loading} icon={Users} color="bg-emerald-500" to="/employees" />
         </div>
       </div>
 
       <div>
         <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">System Health</h2>
-        <div className={`grid grid-cols-1 sm:grid-cols-2 ${isAdmin ? 'lg:grid-cols-4' : 'lg:grid-cols-2'} gap-4`}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <NavCard title="Cameras Online" value={counts.cameras_online} loading={loading} icon={Camera} color="bg-green-500" to="/cameras?status=active" badge={{ label: 'Live', type: 'success' }} />
           <NavCard title="Cameras Offline" value={counts.cameras_offline} loading={loading} icon={Camera} color="bg-slate-400" to="/cameras?status=inactive" badge={counts.cameras_offline > 0 ? { label: 'Attention', type: 'danger' } : undefined} />
-          {isAdmin && (
-            <NavCard title="Edge Servers Online" value={counts.edge_servers_online} loading={loading} icon={Server} color="bg-emerald-500" to="/edge-servers?status=active" badge={{ label: 'Healthy', type: 'success' }} />
-          )}
-          {isAdmin && (
-            <NavCard title="Edge Servers Offline" value={counts.edge_servers_offline} loading={loading} icon={Server} color="bg-slate-400" to="/edge-servers?status=inactive" badge={counts.edge_servers_offline > 0 ? { label: 'Investigate', type: 'danger' } : undefined} />
-          )}
+          <NavCard title="Edge Servers Online" value={counts.edge_servers_online} loading={loading} icon={Server} color="bg-emerald-500" to="/edge-servers?status=active" badge={{ label: 'Healthy', type: 'success' }} />
+          <NavCard title="Edge Servers Offline" value={counts.edge_servers_offline} loading={loading} icon={Server} color="bg-slate-400" to="/edge-servers?status=inactive" badge={counts.edge_servers_offline > 0 ? { label: 'Investigate', type: 'danger' } : undefined} />
         </div>
       </div>
 

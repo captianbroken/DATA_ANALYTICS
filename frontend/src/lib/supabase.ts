@@ -15,4 +15,10 @@ export const supabaseConfigError = isSupabaseConfigured
 export const supabase = createClient(
   supabaseUrl || 'https://placeholder.supabase.co',
   supabaseAnonKey || 'missing-anon-key',
+  {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  },
 );

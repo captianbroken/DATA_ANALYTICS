@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Search, Camera, Filter, Download, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../hooks/useAuth';
+import { selectUsersWithOptionalSite } from '../lib/userQueries';
 
 interface EventRecord {
   id: number;
@@ -12,6 +14,17 @@ interface EventRecord {
   image_path: string | null;
   cameras?: { camera_name: string; sites?: { site_name: string } | { site_name: string }[] } | { camera_name: string; sites?: { site_name: string } | { site_name: string }[] }[];
   employees?: { name: string } | { name: string }[];
+}
+
+interface SiteRecord {
+  id: number;
+  site_name: string;
+}
+
+interface UserScope {
+  id: number;
+  name: string;
+  site_id?: number | null;
 }
 
 const getEventCategory = (value: string | null | undefined) => {
@@ -57,6 +70,9 @@ const downloadCsv = (filename: string, rows: Record<string, string | number | bo
 };
 
 const EventsPage = () => {
+  const { appUser } = useAuth();
+  const isAdmin = appUser?.role === 'admin';
+  const assignedSiteId = appUser?.site_id ?? null;
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -72,15 +88,31 @@ const EventsPage = () => {
   const [typeFilter, setTypeFilter] = useState(initialType);
   const unknownOnly = searchParams.get('unknown') === 'true';
   const [error, setError] = useState('');
+  const [sites, setSites] = useState<SiteRecord[]>([]);
+  const [users, setUsers] = useState<UserScope[]>([]);
+  const selectedSiteId = searchParams.get('site') ?? '';
+  const selectedUserId = searchParams.get('user') ?? '';
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
     setError('');
 
-    const { data, error: fetchError } = await supabase
+    if (!isAdmin && !assignedSiteId) {
+      setEvents([]);
+      setLoading(false);
+      return;
+    }
+
+    let query = supabase
       .from('events')
       .select('id, event_time, event_type, face_detected, confidence_score, image_path, cameras(camera_name, sites(site_name)), employees(name)')
       .order('event_time', { ascending: false });
+
+    if (!isAdmin && assignedSiteId) {
+      query = query.eq('site_id', assignedSiteId);
+    }
+
+    const { data, error: fetchError } = await query;
 
     if (fetchError) {
       setError(fetchError.message);
@@ -89,11 +121,43 @@ const EventsPage = () => {
     }
 
     setLoading(false);
-  }, []);
+  }, [assignedSiteId, isAdmin]);
 
   useEffect(() => {
     fetchEvents();
   }, [fetchEvents]);
+
+  useEffect(() => {
+    const fetchSites = async () => {
+      let query = supabase.from('sites').select('id, site_name').order('site_name');
+      if (!isAdmin && assignedSiteId) {
+        query = query.eq('id', assignedSiteId);
+      }
+      const { data } = await query;
+      setSites((data as SiteRecord[]) ?? []);
+    };
+
+    fetchSites();
+  }, [assignedSiteId, isAdmin]);
+
+  useEffect(() => {
+    const fetchUsers = async () => {
+      if (!isAdmin) {
+        setUsers([]);
+        return;
+      }
+
+      const result = await selectUsersWithOptionalSite<UserScope>(
+        'id, name, site_id',
+        'id, name',
+        query => query.eq('is_deleted', false).order('name'),
+      );
+
+      setUsers(((result.data as UserScope[] | null) ?? []).filter(user => !!user.site_id));
+    };
+
+    fetchUsers();
+  }, [isAdmin]);
 
   useEffect(() => {
     setTypeFilter(initialType);
@@ -129,6 +193,28 @@ const EventsPage = () => {
     setSearchParams(params);
   };
 
+  const handleSiteChange = (value: string) => {
+    const params = new URLSearchParams(searchParams);
+    if (value) params.set('site', value);
+    else params.delete('site');
+    params.delete('user');
+    setSearchParams(params);
+  };
+
+  const handleUserChange = (value: string) => {
+    const params = new URLSearchParams(searchParams);
+    if (value) {
+      params.set('user', value);
+      const user = users.find(entry => String(entry.id) === value);
+      if (user?.site_id) {
+        params.set('site', String(user.site_id));
+      }
+    } else {
+      params.delete('user');
+    }
+    setSearchParams(params);
+  };
+
   const getCamera = (cameraRelation: EventRecord['cameras']) => Array.isArray(cameraRelation) ? cameraRelation[0] : cameraRelation;
   const getEmployee = (employeeRelation: EventRecord['employees']) => Array.isArray(employeeRelation) ? employeeRelation[0] : employeeRelation;
   const getSiteName = (cameraRelation: EventRecord['cameras']) => {
@@ -139,15 +225,20 @@ const EventsPage = () => {
 
   const filtered = events.filter(event => {
     const isUnknown = !getEmployee(event.employees);
+    const siteName = getSiteName(event.cameras);
+    const selectedSiteName = sites.find(site => String(site.id) === selectedSiteId)?.site_name ?? '';
+    const selectedUserSiteId = users.find(user => String(user.id) === selectedUserId)?.site_id;
     const matchSearch =
       (getEmployee(event.employees)?.name ?? 'Unknown').toLowerCase().includes(search.toLowerCase()) ||
-      getSiteName(event.cameras).toLowerCase().includes(search.toLowerCase()) ||
+      siteName.toLowerCase().includes(search.toLowerCase()) ||
       event.event_type.toLowerCase().includes(search.toLowerCase()) ||
       (getCamera(event.cameras)?.camera_name ?? '').toLowerCase().includes(search.toLowerCase());
 
     const matchType = typeFilter === 'All' || getEventCategory(event.event_type) === typeFilter;
+    const matchSite = !selectedSiteId || siteName === selectedSiteName;
+    const matchUserScope = !selectedUserId || (selectedUserSiteId != null && selectedSiteId === String(selectedUserSiteId));
     const matchUnknown = !unknownOnly || isUnknown;
-    return matchSearch && matchType && matchUnknown;
+    return matchSearch && matchType && matchSite && matchUserScope && matchUnknown;
   });
 
   const handleExport = () => {
@@ -209,6 +300,27 @@ const EventsPage = () => {
             {typeOptions.map(option => <option key={option} value={option}>{option}</option>)}
           </select>
         </div>
+        <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <span className="text-xs text-slate-400 uppercase tracking-wide">Site</span>
+          <select value={selectedSiteId} onChange={event => handleSiteChange(event.target.value)} className="text-slate-700 text-sm bg-transparent outline-none">
+            <option value="">All</option>
+            {sites.map(site => <option key={site.id} value={site.id}>{site.site_name}</option>)}
+          </select>
+        </div>
+        {isAdmin && users.length > 0 && (
+          <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm">
+            <span className="text-xs text-slate-400 uppercase tracking-wide">User</span>
+            <select value={selectedUserId} onChange={event => handleUserChange(event.target.value)} className="text-slate-700 text-sm bg-transparent outline-none">
+              <option value="">All</option>
+              {users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}
+            </select>
+          </div>
+        )}
+        {isAdmin && users.length === 0 && (
+          <span className="text-xs text-amber-600 bg-amber-50 border border-amber-100 px-3 py-2 rounded-lg">
+            Assign a site to a user in Users before filtering by user.
+          </span>
+        )}
         {unknownOnly && (
           <button
             onClick={clearUnknownFilter}

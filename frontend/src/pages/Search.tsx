@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Activity, Camera, MapPin, Server, ShieldAlert, Users } from 'lucide-react';
@@ -216,103 +217,102 @@ const SearchPage = () => {
   }
 
   const totalResults = Object.values(results).reduce((sum, list) => sum + list.length, 0);
-  const sections = [
+  const sections: Array<{
+    key: string;
+    title: string;
+    icon: typeof MapPin;
+    viewAll: string;
+    items: ReactNode[];
+  }> = [
     {
       key: 'sites',
       title: 'Sites',
       icon: MapPin,
       viewAll: `/sites?q=${encodeURIComponent(query)}`,
-      items: results.sites,
-      render: (site: SiteResult) => (
+      items: results.sites.map(site => (
         <li key={site.id} className="py-2">
           <p className="text-sm font-medium text-slate-700">{site.site_name}</p>
           <p className="text-xs text-slate-400">{site.address || '-'}</p>
         </li>
-      ),
+      )),
     },
     {
       key: 'cameras',
       title: 'Cameras',
       icon: Camera,
       viewAll: `/cameras?q=${encodeURIComponent(query)}`,
-      items: results.cameras,
-      render: (camera: CameraResult) => (
+      items: results.cameras.map(camera => (
         <li key={camera.id} className="py-2">
           <p className="text-sm font-medium text-slate-700">{camera.camera_name}</p>
           <p className="text-xs text-slate-400">{getSiteName(camera.sites)}</p>
         </li>
-      ),
+      )),
     },
     {
       key: 'edgeServers',
       title: 'Edge Servers',
       icon: Server,
       viewAll: `/edge-servers?q=${encodeURIComponent(query)}`,
-      items: results.edgeServers,
-      render: (server: EdgeServerResult) => (
+      items: results.edgeServers.map(server => (
         <li key={server.id} className="py-2">
           <p className="text-sm font-medium text-slate-700">{server.server_name}</p>
           <p className="text-xs text-slate-400">{server.ip_address || '-'}</p>
         </li>
-      ),
+      )),
     },
     {
       key: 'employees',
       title: 'Employees',
       icon: Users,
       viewAll: `/employees?q=${encodeURIComponent(query)}`,
-      items: results.employees,
-      render: (employee: EmployeeResult) => (
+      items: results.employees.map(employee => (
         <li key={employee.id} className="py-2">
           <p className="text-sm font-medium text-slate-700">{employee.name}</p>
           <p className="text-xs text-slate-400">
             {employee.employee_code || '-'} - {employee.department || '-'}
           </p>
         </li>
-      ),
+      )),
     },
     {
       key: 'users',
       title: 'Users',
       icon: Users,
       viewAll: `/users?q=${encodeURIComponent(query)}`,
-      items: results.users,
-      render: (user: UserResult) => (
+      items: results.users.map(user => (
         <li key={user.id} className="py-2">
           <p className="text-sm font-medium text-slate-700">{user.name}</p>
           <p className="text-xs text-slate-400">{user.email}</p>
         </li>
-      ),
+      )),
     },
     {
       key: 'events',
       title: 'Events',
       icon: Activity,
       viewAll: `/events?q=${encodeURIComponent(query)}`,
-      items: results.events,
-      render: (event: EventResult) => (
+      items: results.events.map(event => (
         <li key={event.id} className="py-2">
           <p className="text-sm font-medium text-slate-700">{event.event_type || 'Event'}</p>
           <p className="text-xs text-slate-400">
             {getCameraName(event.cameras)} - {getEmployeeName(event.employees)}
           </p>
         </li>
-      ),
+      )),
     },
     {
       key: 'violations',
       title: 'Violations',
       icon: ShieldAlert,
       viewAll: `/violations?q=${encodeURIComponent(query)}`,
-      items: results.violations,
-      render: (violation: ViolationResult) => (
+      items: results.violations.map(violation => (
         <li key={violation.id} className="py-2">
           <p className="text-sm font-medium text-slate-700">{violation.violation_type}</p>
           <p className="text-xs text-slate-400">
             {getCameraName(violation.cameras)} - {getEmployeeName(violation.employees)}
           </p>
         </li>
-      ),
+      )),
     },
   ].filter(section => section.items.length > 0);
 
@@ -359,7 +359,7 @@ const SearchPage = () => {
                   </Link>
                 </div>
                 <ul className="divide-y divide-slate-100">
-                  {section.items.map(section.render)}
+                  {section.items}
                 </ul>
               </div>
             );

@@ -1,17 +1,28 @@
 import { useEffect, useState } from 'react';
-import { isSupabaseConfigured, supabase } from '../lib/supabase';
-import type { Session } from '@supabase/supabase-js';
+import { isSupabaseConfigured } from '../lib/supabase';
+import { selectUsersWithOptionalSite } from '../lib/userQueries';
 
 export interface AppUser {
   id: number;
   email: string;
   name: string;
   role: 'admin' | 'user';
+  site_id: number | null;
   status: string;
 }
 
+export interface AppSession {
+  user: {
+    email: string;
+  };
+  created_at: string;
+  app_user?: AppUser;
+}
+
+const SESSION_KEY = 'hyperspark_session';
+
 export const useAuth = () => {
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<AppSession | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -19,99 +30,76 @@ export const useAuth = () => {
     const loadAppUser = async (email?: string | null) => {
       if (!email || !isSupabaseConfigured) {
         setAppUser(null);
-        return;
+        return null;
       }
 
-      const { data: userRecord } = await supabase
-        .from('users')
-        .select('id, name, email, status, is_deleted, roles(role_name)')
-        .eq('email', email)
-        .eq('is_deleted', false)
-        .single();
+      const { data: userRecord } = await selectUsersWithOptionalSite<any>(
+        'id, name, email, status, is_deleted, site_id, roles(role_name)',
+        'id, name, email, status, is_deleted, roles(role_name)',
+        query => query.eq('email', email).eq('is_deleted', false).single(),
+      );
 
       const roleName = Array.isArray(userRecord?.roles)
         ? userRecord.roles[0]?.role_name
         : ((userRecord?.roles ?? null) as unknown as { role_name?: string } | null)?.role_name;
 
-      if (userRecord && roleName) {
-        setAppUser({
+      if (userRecord && roleName && userRecord.status === 'active') {
+        const nextUser = {
           id: userRecord.id,
           email: userRecord.email,
           name: userRecord.name,
           role: roleName as 'admin' | 'user',
+          site_id: userRecord.site_id ?? null,
           status: userRecord.status,
-        });
-      } else {
-        setAppUser(null);
+        };
+        setAppUser(nextUser);
+        return nextUser;
       }
+
+      setAppUser(null);
+      return null;
     };
 
-    const fetchSession = async () => {
-      // Check for fallback session first (to keep app feeling fast if Supabase is slow/failing)
-      const fallbackUserJson = localStorage.getItem('hyperspark_user');
-      if (fallbackUserJson) {
-        try {
-          const storedUser = JSON.parse(fallbackUserJson);
-          console.log('Using fallback auth session for:', storedUser.email);
-          
-          setAppUser(storedUser);
-          // Set a minimal mock session to satisfy the "!session" check in layouts
-          setSession({
-            access_token: 'fallback-token',
-            refresh_token: 'fallback-refresh',
-            expires_in: 3600,
-            token_type: 'bearer',
-            user: { 
-              id: storedUser.auth_user_id || 'fallback-id', 
-              email: storedUser.email,
-              app_metadata: {},
-              user_metadata: { name: storedUser.name },
-              aud: 'authenticated',
-              created_at: new Date().toISOString()
-            } as any
-          });
-          setLoading(false);
-          // We still try to check for a real session in the background
-        } catch (e) {
-          console.error('Failed to parse fallback user:', e);
-        }
-      }
+    const bootstrap = async () => {
+      localStorage.removeItem('hyperspark_user');
+      localStorage.removeItem('hyperspark_fallback_auth');
 
-      if (!isSupabaseConfigured) {
+      const raw = sessionStorage.getItem(SESSION_KEY);
+      if (!raw) {
+        setSession(null);
+        setAppUser(null);
         setLoading(false);
         return;
       }
 
-      const { data: { session: realSession } } = await supabase.auth.getSession();
-      
-      // Only override if we didn't already set a fallback user, 
-      // or if we found a real session that's better.
-      if (realSession) {
-        setSession(realSession);
-        await loadAppUser(realSession.user?.email);
+      try {
+        const parsed = JSON.parse(raw) as AppSession;
+        if (parsed.app_user?.email && parsed.app_user?.id) {
+          setAppUser(parsed.app_user);
+          setSession(parsed);
+          setLoading(false);
+          return;
+        }
+
+        const nextUser = await loadAppUser(parsed.user?.email);
+        if (nextUser) {
+          const nextSession = { ...parsed, app_user: nextUser };
+          sessionStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
+          setSession(nextSession);
+        } else {
+          sessionStorage.removeItem(SESSION_KEY);
+          setSession(null);
+        }
+      } catch {
+        sessionStorage.removeItem(SESSION_KEY);
+        setSession(null);
+        setAppUser(null);
       }
-      
+
       setLoading(false);
     };
 
-    fetchSession();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
-      if (_event === 'SIGNED_OUT') {
-        setSession(null);
-        setAppUser(null);
-        localStorage.removeItem('hyperspark_user');
-        localStorage.removeItem('hyperspark_fallback_auth');
-        return;
-      }
-      
-      if (nextSession) {
-        setSession(nextSession);
-        await loadAppUser(nextSession.user?.email);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    bootstrap();
   }, []);
 
   return { session, appUser, loading };

@@ -11,7 +11,9 @@ interface UserRecord {
   status: string;
   last_login: string | null;
   role_id: number | null;
+  site_id: number | null;
   roles?: { role_name: 'admin' | 'user' } | { role_name: 'admin' | 'user' }[];
+  sites?: { site_name: string } | { site_name: string }[];
   created_at?: string | null;
 }
 
@@ -31,13 +33,22 @@ const formatDate = (value: string | null | undefined) => {
   return new Date(value).toLocaleString();
 };
 
+const getSiteName = (user: UserRecord | null) => {
+  if (!user) return 'Unassigned';
+  if (getRoleName(user) === 'admin') return 'Global access';
+  if (Array.isArray(user.sites)) return user.sites[0]?.site_name ?? 'Unassigned';
+  return user.sites?.site_name ?? 'Unassigned';
+};
+
 const UserOverview = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [user, setUser] = useState<UserRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [eventCount, setEventCount] = useState(0);
+  const [cameraCount, setCameraCount] = useState(0);
+  const [employeeCount, setEmployeeCount] = useState(0);
+  const [edgeServerCount, setEdgeServerCount] = useState(0);
   const [recentEvents, setRecentEvents] = useState<EventRecord[]>([]);
 
   const userId = useMemo(() => Number(id), [id]);
@@ -54,23 +65,11 @@ const UserOverview = () => {
       setLoading(true);
       setError('');
 
-      const [{ data: userData, error: userError }, { count: eventsCount }, { data: eventsData }] = await Promise.all([
-        supabase
-          .from('users')
-          .select('id, auth_user_id, name, email, status, last_login, role_id, roles(role_name), created_at')
-          .eq('id', userId)
-          .single(),
-        supabase
-          .from('events')
-          .select('*', { count: 'exact', head: true })
-          .eq('created_by', userId),
-        supabase
-          .from('events')
-          .select('id, event_time, event_type')
-          .eq('created_by', userId)
-          .order('event_time', { ascending: false })
-          .limit(6),
-      ]);
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('id, auth_user_id, name, email, status, last_login, role_id, site_id, roles(role_name), sites(site_name), created_at')
+        .eq('id', userId)
+        .single();
 
       if (!mounted) return;
 
@@ -80,8 +79,31 @@ const UserOverview = () => {
         return;
       }
 
-      setUser(userData as UserRecord);
-      setEventCount(eventsCount ?? 0);
+      const typedUser = userData as UserRecord;
+      const scopedSiteId = typedUser.site_id;
+      const isAdminUser = getRoleName(typedUser) === 'admin';
+
+      const [{ count: camerasCount }, { count: employeesCount }, { count: serversCount }, { data: eventsData }] = await Promise.all([
+        (isAdminUser || !scopedSiteId
+          ? supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false)
+          : supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', scopedSiteId)),
+        (isAdminUser || !scopedSiteId
+          ? supabase.from('employees').select('*', { count: 'exact', head: true }).eq('is_deleted', false)
+          : supabase.from('employees').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', scopedSiteId)),
+        (isAdminUser || !scopedSiteId
+          ? supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false)
+          : supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', scopedSiteId)),
+        (isAdminUser || !scopedSiteId
+          ? supabase.from('events').select('id, event_time, event_type').order('event_time', { ascending: false }).limit(6)
+          : supabase.from('events').select('id, event_time, event_type').eq('site_id', scopedSiteId).order('event_time', { ascending: false }).limit(6)),
+      ]);
+
+      if (!mounted) return;
+
+      setUser(typedUser);
+      setCameraCount(camerasCount ?? 0);
+      setEmployeeCount(employeesCount ?? 0);
+      setEdgeServerCount(serversCount ?? 0);
       setRecentEvents((eventsData as EventRecord[]) ?? []);
       setLoading(false);
     };
@@ -153,7 +175,11 @@ const UserOverview = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
+          <p className="text-xs text-slate-500">Assigned Site</p>
+          <p className="text-sm font-medium text-slate-800 mt-2">{getSiteName(user)}</p>
+        </div>
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
           <p className="text-xs text-slate-500">Last Login</p>
           <p className="text-sm font-medium text-slate-800 mt-2">{formatDate(user.last_login)}</p>
@@ -162,21 +188,32 @@ const UserOverview = () => {
           <p className="text-xs text-slate-500">Account Created</p>
           <p className="text-sm font-medium text-slate-800 mt-2">{formatDate(user.created_at)}</p>
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
-          <p className="text-xs text-slate-500">Events Created</p>
-          <p className="text-2xl font-bold text-slate-800 mt-1">{eventCount}</p>
+          <p className="text-xs text-slate-500">Assigned Cameras</p>
+          <p className="text-2xl font-bold text-slate-800 mt-1">{cameraCount}</p>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
+          <p className="text-xs text-slate-500">Assigned Edge Servers</p>
+          <p className="text-2xl font-bold text-slate-800 mt-1">{edgeServerCount}</p>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
+          <p className="text-xs text-slate-500">Assigned Employees</p>
+          <p className="text-2xl font-bold text-slate-800 mt-1">{employeeCount}</p>
         </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <h3 className="font-bold text-slate-800 flex items-center gap-2">
-            <Activity size={16} className="text-blue-500" /> Recent Events Created
+            <Activity size={16} className="text-blue-500" /> Recent Site Events
           </h3>
           <Link to="/events" className="text-xs text-blue-600">View all events</Link>
         </div>
         {recentEvents.length === 0 ? (
-          <div className="p-8 text-center text-slate-400 text-sm">No events created by this user yet.</div>
+          <div className="p-8 text-center text-slate-400 text-sm">No recent events found for this user's assigned site.</div>
         ) : (
           <table className="w-full text-sm text-left">
             <thead className="text-xs text-slate-500 bg-slate-50 border-b border-slate-100">

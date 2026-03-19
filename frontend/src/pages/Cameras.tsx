@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { Plus, Search, Eye, Edit2, Trash2, Video, Wifi, WifiOff, RefreshCw, Server } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Modal, FormField, FormActions } from '../components/ui/Modal';
+import { useAuth } from '../hooks/useAuth';
+import { selectUsersWithOptionalSite } from '../lib/userQueries';
 
 interface Camera {
   id: number;
@@ -19,7 +21,8 @@ interface Camera {
 }
 
 interface Site { id: number; site_name: string; }
-interface EdgeServer { id: number; server_name: string; }
+interface EdgeServer { id: number; server_name: string; ip_address?: string | null; site_id?: number | null; }
+interface UserOption { id: number; name: string; site_id?: number | null; }
 
 const RTSP_TEST_PROTOCOL = import.meta.env.VITE_RTSP_TEST_PROTOCOL || 'http';
 const RTSP_TEST_PORT = import.meta.env.VITE_RTSP_TEST_PORT || '5050';
@@ -90,9 +93,10 @@ const CamForm = ({
   rtspTestStatus,
   rtspTestMessage,
   rtspTestUrl,
+  rtspTestEdgeServerId,
   onTestRtsp,
   onCancel, 
-  onSubmit 
+  onSubmit,
 }: { 
   form: any; 
   setForm: any; 
@@ -171,9 +175,13 @@ const CamForm = ({
 };
 
 const CamerasPage = () => {
+  const { appUser } = useAuth();
+  const isAdmin = appUser?.role === 'admin';
+  const assignedSiteId = appUser?.site_id ?? null;
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [edgeServers, setEdgeServers] = useState<EdgeServer[]>([]);
+  const [users, setUsers] = useState<UserOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
@@ -248,18 +256,41 @@ const CamerasPage = () => {
     setLoading(true);
     setError('');
 
-    const [{ data: cameraData, error: cameraError }, { data: siteData }, { data: serverData }] = await Promise.all([
-      supabase.from('cameras').select('*, sites(site_name)').eq('is_deleted', false).order('created_at', { ascending: false }),
-      supabase.from('sites').select('id, site_name').order('site_name'),
-      supabase.from('edge_servers').select('id, server_name').eq('is_deleted', false).order('server_name'),
+    if (!isAdmin && !assignedSiteId) {
+      setCameras([]);
+      setSites([]);
+      setEdgeServers([]);
+      setUsers([]);
+      setLoading(false);
+      return;
+    }
+
+    let cameraQuery = supabase.from('cameras').select('*, sites(site_name)').eq('is_deleted', false).order('created_at', { ascending: false });
+    let siteQuery = supabase.from('sites').select('id, site_name').order('site_name');
+    let serverQuery = supabase.from('edge_servers').select('id, server_name, ip_address, site_id').eq('is_deleted', false).order('server_name');
+
+    if (!isAdmin && assignedSiteId) {
+      cameraQuery = cameraQuery.eq('site_id', assignedSiteId);
+      siteQuery = siteQuery.eq('id', assignedSiteId);
+      serverQuery = serverQuery.eq('site_id', assignedSiteId);
+    }
+
+    const [{ data: cameraData, error: cameraError }, { data: siteData }, { data: serverData }, usersResult] = await Promise.all([
+      cameraQuery,
+      siteQuery,
+      serverQuery,
+      isAdmin
+        ? selectUsersWithOptionalSite<UserOption>('id, name, site_id', 'id, name', query => query.eq('is_deleted', false).not('site_id', 'is', null).order('name'))
+        : Promise.resolve({ data: [], error: null, siteAssignmentAvailable: true }),
     ]);
 
     if (cameraError) setError(cameraError.message);
     if (cameraData) setCameras(cameraData as Camera[]);
     if (siteData) setSites(siteData as Site[]);
     if (serverData) setEdgeServers(serverData as EdgeServer[]);
+    setUsers((usersResult.data as UserOption[] | null) ?? []);
     setLoading(false);
-  }, []);
+  }, [assignedSiteId, isAdmin]);
 
   useEffect(() => {
     fetchAll();
@@ -327,14 +358,24 @@ const CamerasPage = () => {
     const value = (searchParams.get('status') || '').toLowerCase();
     return value === 'active' || value === 'inactive' ? value : '';
   }, [searchParams]);
+  const selectedUserId = searchParams.get('user') ?? '';
 
   const filtered = cameras.filter(camera => {
+    const selectedUser = users.find(user => String(user.id) === selectedUserId);
     const matchSearch =
       camera.camera_name.toLowerCase().includes(search.toLowerCase()) ||
       (camera.sites?.site_name ?? '').toLowerCase().includes(search.toLowerCase());
     const matchStatus = !statusFilter || camera.status === statusFilter;
-    return matchSearch && matchStatus;
+    const matchUser = !selectedUser || camera.site_id === selectedUser.site_id;
+    return matchSearch && matchStatus && matchUser;
   });
+
+  const handleUserChange = (value: string) => {
+    const params = new URLSearchParams(searchParams);
+    if (value) params.set('user', value);
+    else params.delete('user');
+    setSearchParams(params);
+  };
 
   const buildPayload = () => ({
     camera_name: form.camera_name.trim(),
@@ -342,7 +383,7 @@ const CamerasPage = () => {
     location: form.location.trim(),
     status: form.status,
     ai_model: form.ai_model,
-    site_id: form.site_id ? Number(form.site_id) : null,
+    site_id: isAdmin ? (form.site_id ? Number(form.site_id) : null) : assignedSiteId,
     edge_server_id: form.edge_server_id ? Number(form.edge_server_id) : null,
   });
 
@@ -431,11 +472,13 @@ const CamerasPage = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Camera Management</h1>
-          <p className="text-slate-500 text-sm mt-1">Configure RTSP streams and AI processing</p>
+          <p className="text-slate-500 text-sm mt-1">
+            {isAdmin ? 'Configure RTSP streams and AI processing' : 'Manage cameras for your assigned site'}
+          </p>
         </div>
         <div className="flex gap-2">
           <button onClick={fetchAll} className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"><RefreshCw size={16} className={loading ? 'animate-spin' : ''} /></button>
-          <button onClick={() => { setForm(emptyForm); setError(''); setRtspTestStatus('idle'); setRtspTestUrl(''); setRtspTestMessage(''); setRtspTestEdgeServerId(null); setShowAdd(true); }} style={{ backgroundColor: '#005baa' }} className="text-white px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-medium hover:opacity-90 shadow-sm">
+          <button onClick={() => { setForm({ ...emptyForm, site_id: assignedSiteId ? String(assignedSiteId) : '' }); setError(''); setRtspTestStatus('idle'); setRtspTestUrl(''); setRtspTestMessage(''); setRtspTestEdgeServerId(null); setShowAdd(true); }} style={{ backgroundColor: '#005baa' }} className="text-white px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-medium hover:opacity-90 shadow-sm">
             <Plus size={16} /> Add Camera
           </button>
         </div>
@@ -478,6 +521,20 @@ const CamerasPage = () => {
           >
             Status: {statusFilter === 'active' ? 'Online' : 'Offline'} x
           </button>
+        )}
+        {isAdmin && users.length > 0 && (
+          <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm">
+            <span className="text-xs text-slate-400 uppercase tracking-wide">User</span>
+            <select value={selectedUserId} onChange={event => handleUserChange(event.target.value)} className="text-slate-700 text-sm bg-transparent outline-none">
+              <option value="">All</option>
+              {users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}
+            </select>
+          </div>
+        )}
+        {isAdmin && users.length === 0 && (
+          <span className="text-xs text-amber-600 bg-amber-50 border border-amber-100 px-3 py-2 rounded-lg">
+            Assign a site to a user in Users before filtering by user.
+          </span>
         )}
         <span className="text-xs text-slate-500 bg-slate-100 px-3 py-2 rounded-lg">{filtered.length} cameras</span>
       </div>

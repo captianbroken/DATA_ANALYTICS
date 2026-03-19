@@ -17,12 +17,12 @@ const DashboardLayout = () => {
     );
   }
 
-  // Redirect to login if no session
-  if (!session) {
+  // Redirect to login if no authenticated app user/session is available
+  if (!session || !appUser) {
     return <Navigate to="/login" replace />;
   }
 
-  const role = appUser?.role ?? 'user';
+  const role = appUser.role;
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50 font-sans">

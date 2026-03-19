@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lock, Save, UserCircle, X } from 'lucide-react';
+import { Lock, Save, UserCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 
@@ -20,8 +20,6 @@ const ProfilePage = () => {
       setName(appUser.name ?? '');
     }
   }, [appUser]);
-
-  const isFallbackAuth = useMemo(() => localStorage.getItem('hyperspark_fallback_auth') === 'true', []);
 
   const displayEmail = appUser?.email || session?.user?.email || '';
 
@@ -62,8 +60,6 @@ const ProfilePage = () => {
       return;
     }
 
-    const updated = { ...appUser, name: name.trim() };
-    localStorage.setItem('hyperspark_user', JSON.stringify(updated));
     setSuccess('Profile updated successfully.');
     setSaving(false);
   };
@@ -88,13 +84,16 @@ const ProfilePage = () => {
       setError('Passwords do not match.');
       return;
     }
-    if (!session || isFallbackAuth) {
-      setError('Password change requires a valid Supabase auth session. Please re-login.');
+    if (!appUser) {
+      setError('Please sign in again before changing your password.');
       return;
     }
 
     setPwdLoading(true);
-    const { error: pwdError } = await supabase.auth.updateUser({ password });
+    const { error: pwdError } = await supabase.rpc('change_dashboard_password', {
+      p_user_id: appUser.id,
+      p_password: password,
+    });
     if (pwdError) {
       setError(pwdError.message || 'Failed to update password.');
       setPwdLoading(false);
@@ -237,9 +236,9 @@ const ProfilePage = () => {
             <Lock size={14} /> {pwdLoading ? 'Updating...' : 'Update Password'}
           </button>
         </div>
-        {(isFallbackAuth || !session) && (
+        {!session && (
           <p className="text-xs text-slate-400 mt-3">
-            Password change requires a valid Supabase session. Please log in again if this stays disabled.
+            Password changes are applied through the dashboard database session for the current tab.
           </p>
         )}
       </div>

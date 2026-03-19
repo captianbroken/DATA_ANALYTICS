@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bell, Search, LogOut, UserCircle } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { supabase } from '../../lib/supabase';
 
 interface HeaderProps {
   userName?: string;
@@ -17,9 +16,18 @@ const Header = ({ userName, role }: HeaderProps) => {
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
+    const nextQuery = params.get('q') ?? '';
+
+    // When the header itself updates the URL, keep the in-progress input value
+    // if it only differs by surrounding spaces. This prevents the debounce
+    // sync from removing the space between words while the user is still typing.
+    if (sourceRef.current === 'header' && query.trim() === nextQuery) {
+      return;
+    }
+
     sourceRef.current = 'url';
-    setQuery(params.get('q') ?? '');
-  }, [location.search]);
+    setQuery(nextQuery);
+  }, [location.search, query]);
 
   const isAdmin = role === 'admin';
 
@@ -76,11 +84,11 @@ const Header = ({ userName, role }: HeaderProps) => {
     };
   }, [query, location.pathname, location.search]);
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
+  const handleLogout = () => {
     localStorage.removeItem('hyperspark_user');
     localStorage.removeItem('hyperspark_fallback_auth');
-    navigate('/login');
+    sessionStorage.removeItem('hyperspark_session');
+    navigate('/login', { replace: true });
   };
 
   return (

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import DashboardLayout from './components/layout/DashboardLayout';
@@ -15,7 +16,7 @@ import UserOverview from './pages/UserOverview';
 import { useAuth } from './hooks/useAuth';
 import ProfilePage from './pages/Profile';
 
-const RequireAdmin = ({ children }: { children: JSX.Element }) => {
+const RequireAdmin = ({ children }: { children: ReactNode }) => {
   const { appUser, loading } = useAuth();
 
   if (loading) {
@@ -47,14 +48,7 @@ function App() {
           <Route index element={<DashboardOverview />} />
           <Route path="sites" element={<SitesPage />} />
           <Route path="cameras" element={<CamerasPage />} />
-          <Route
-            path="edge-servers"
-            element={
-              <RequireAdmin>
-                <EdgeServersPage />
-              </RequireAdmin>
-            }
-          />
+          <Route path="edge-servers" element={<EdgeServersPage />} />
           <Route path="employees" element={<EmployeesPage />} />
           <Route path="events" element={<EventsPage />} />
           <Route path="violations" element={<ViolationsPage />} />

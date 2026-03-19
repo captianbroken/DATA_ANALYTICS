@@ -4,7 +4,6 @@ import {
   ShieldAlert, UserCog, Settings, LogOut,
 } from 'lucide-react';
 import { HypersparkWordmark } from '../brand/HypersparkBrand';
-import { supabase } from '../../lib/supabase';
 
 interface SidebarProps {
   role: 'admin' | 'user';
@@ -27,6 +26,7 @@ const userMenu = [
   { name: 'Dashboard', icon: LayoutDashboard, path: '/' },
   { name: 'Sites', icon: MapPin, path: '/sites' },
   { name: 'Cameras', icon: Video, path: '/cameras' },
+  { name: 'Edge Servers', icon: Server, path: '/edge-servers' },
   { name: 'Employees', icon: Users, path: '/employees' },
   { name: 'Events', icon: AlertTriangle, path: '/events' },
   { name: 'Violations', icon: ShieldAlert, path: '/violations' },
@@ -36,9 +36,11 @@ const Sidebar = ({ role, userName }: SidebarProps) => {
   const navigate = useNavigate();
   const menuItems = role === 'admin' ? adminMenu : userMenu;
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    navigate('/login');
+  const handleLogout = () => {
+    localStorage.removeItem('hyperspark_user');
+    localStorage.removeItem('hyperspark_fallback_auth');
+    sessionStorage.removeItem('hyperspark_session');
+    navigate('/login', { replace: true });
   };
 
   return (
