@@ -50,6 +50,12 @@ const Login = () => {
     }
   };
 
+  const isAuthUnavailableError = (err: any) => {
+    const message = (err?.message ?? '').toString().toLowerCase();
+    const code = (err?.code ?? '').toString().toLowerCase();
+    return code === 'unexpected_failure' || message.includes('database error querying schema');
+  };
+
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
     setLoading(true);
@@ -60,6 +66,7 @@ const Login = () => {
       // Clear any stale fallback session before a new login attempt.
       localStorage.removeItem('hyperspark_user');
       localStorage.removeItem('hyperspark_fallback_auth');
+      localStorage.removeItem('hyperspark_session');
       sessionStorage.removeItem('hyperspark_session');
 
       if (!isSupabaseConfigured) {
@@ -77,6 +84,13 @@ const Login = () => {
         throw new Error('Invalid email or password.');
       }
 
+      const { error: authError } = await supabase.auth.signInWithPassword({
+        email: appUser.email,
+        password,
+      });
+
+      if (authError && !isAuthUnavailableError(authError)) throw authError;
+
       // We only update last_login if auth actually gave us an active session,
       // but we can try updating it anyway.
       await supabase
@@ -84,7 +98,7 @@ const Login = () => {
         .update({ last_login: new Date().toISOString() })
         .eq('id', appUser.id);
 
-      sessionStorage.setItem('hyperspark_session', JSON.stringify({
+      localStorage.setItem('hyperspark_session', JSON.stringify({
         user: { email: appUser.email },
         created_at: new Date().toISOString(),
         app_user: {
@@ -101,7 +115,11 @@ const Login = () => {
     } catch (err: any) {
       localStorage.removeItem('hyperspark_user');
       localStorage.removeItem('hyperspark_fallback_auth');
+      localStorage.removeItem('hyperspark_session');
       sessionStorage.removeItem('hyperspark_session');
+      if (!isAuthUnavailableError(err)) {
+        await supabase.auth.signOut();
+      }
       setError(toFriendlyError(err));
       captureDebugInfo(err);
       console.error('Login error:', err);

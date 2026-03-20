@@ -1,4 +1,17 @@
-psycopg2-binary 
+# Core DB tools
+psycopg2-binary
 python-dotenv
-
 sqlalchemy
+
+# YOLO / Computer Vision
+ultralytics
+opencv-python
+Pillow
+numpy
+
+# Web API
+flask
+flask-cors
+
+# Data utilities
+requests

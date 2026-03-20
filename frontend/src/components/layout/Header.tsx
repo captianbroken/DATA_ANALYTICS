@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bell, Search, LogOut, UserCircle } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { supabase } from '../../lib/supabase';
 
 interface HeaderProps {
   userName?: string;
@@ -84,9 +85,11 @@ const Header = ({ userName, role }: HeaderProps) => {
     };
   }, [query, location.pathname, location.search]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     localStorage.removeItem('hyperspark_user');
     localStorage.removeItem('hyperspark_fallback_auth');
+    localStorage.removeItem('hyperspark_session');
     sessionStorage.removeItem('hyperspark_session');
     navigate('/login', { replace: true });
   };
@@ -148,7 +151,7 @@ const Header = ({ userName, role }: HeaderProps) => {
 
         {/* Logout */}
         <button
-          onClick={handleLogout}
+          onClick={() => { void handleLogout(); }}
           className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
           title="Sign out"
         >

@@ -1,0 +1,298 @@
+[
+  {
+    "image_filename": "detected_ppe_real_0001.jpg",
+    "image_path": "C:\\Users\\91832\\Desktop\\Praveen\\backend\\detections\\detected_ppe_real_0001.jpg",
+    "original_filename": "ppe_real_0001.jpg",
+    "confidence": 43.0,
+    "ppe": {
+      "helmet": false,
+      "vest": true,
+      "gloves": true,
+      "goggles": true
+    },
+    "has_violation": true,
+    "violation_types": [
+      "No Helmet"
+    ],
+    "event_time": "2026-03-20T07:19:25.388401",
+    "bbox": {
+      "x": 756,
+      "y": 166,
+      "w": 219,
+      "h": 220
+    }
+  },
+  {
+    "image_filename": "detected_ppe_real_0002.jpg",
+    "image_path": "C:\\Users\\91832\\Desktop\\Praveen\\backend\\detections\\detected_ppe_real_0002.jpg",
+    "original_filename": "ppe_real_0002.jpg",
+    "confidence": 85.0,
+    "ppe": {
+      "helmet": true,
+      "vest": false,
+      "gloves": true,
+      "goggles": true
+    },
+    "has_violation": true,
+    "violation_types": [
+      "No Safety Vest"
+    ],
+    "event_time": "2026-03-20T07:25:25.388401",
+    "bbox": {
+      "x": 364,
+      "y": 201,
+      "w": 395,
+      "h": 642
+    }
+  },
+  {
+    "image_filename": "detected_ppe_real_0003.jpg",
+    "image_path": "C:\\Users\\91832\\Desktop\\Praveen\\backend\\detections\\detected_ppe_real_0003.jpg",
+    "original_filename": "ppe_real_0003.jpg",
+    "confidence": 77.65,
+    "ppe": {
+      "helmet": false,
+      "vest": false,
+      "gloves": true,
+      "goggles": true
+    },
+    "has_violation": true,
+    "violation_types": [
+      "No Helmet",
+      "No Safety Vest"
+    ],
+    "event_time": "2026-03-20T07:31:25.388401",
+    "bbox": {
+      "x": 12,
+      "y": 50,
+      "w": 1046,
+      "h": 792
+    }
+  },
+  {
+    "image_filename": "detected_ppe_real_0007.jpg",
+    "image_path": "C:\\Users\\91832\\Desktop\\Praveen\\backend\\detections\\detected_ppe_real_0007.jpg",
+    "original_filename": "ppe_real_0007.jpg",
+    "confidence": 75.82,
+    "ppe": {
+      "helmet": false,
+      "vest": false,
+      "gloves": true,
+      "goggles": true
+    },
+    "has_violation": true,
+    "violation_types": [
+      "No Helmet",
+      "No Safety Vest"
+    ],
+    "event_time": "2026-03-20T07:55:25.388401",
+    "bbox": {
+      "x": 400,
+      "y": 551,
+      "w": 80,
+      "h": 194
+    }
+  },
+  {
+    "image_filename": "detected_ppe_real_0008.jpg",
+    "image_path": "C:\\Users\\91832\\Desktop\\Praveen\\backend\\detections\\detected_ppe_real_0008.jpg",
+    "original_filename": "ppe_real_0008.jpg",
+    "confidence": 80.14,
+    "ppe": {
+      "helmet": true,
+      "vest": false,
+      "gloves": true,
+      "goggles": true
+    },
+    "has_violation": true,
+    "violation_types": [
+      "No Safety Vest"
+    ],
+    "event_time": "2026-03-20T08:01:25.388401",
+    "bbox": {
+      "x": 471,
+      "y": 626,
+      "w": 494,
+      "h": 1061
+    }
+  },
+  {
+    "image_filename": "detected_ppe_real_0010.jpg",
+    "image_path": "C:\\Users\\91832\\Desktop\\Praveen\\backend\\detections\\detected_ppe_real_0010.jpg",
+    "original_filename": "ppe_real_0010.jpg",
+    "confidence": 91.81,
+    "ppe": {
+      "helmet": true,
+      "vest": true,
+      "gloves": true,
+      "goggles": true
+    },
+    "has_violation": false,
+    "violation_types": [],
+    "event_time": "2026-03-20T08:13:25.388401",
+    "bbox": {
+      "x": 485,
+      "y": 481,
+      "w": 408,
+      "h": 474
+    }
+  },
+  {
+    "image_filename": "detected_ppe_real_0011.jpg",
+    "image_path": "C:\\Users\\91832\\Desktop\\Praveen\\backend\\detections\\detected_ppe_real_0011.jpg",
+    "original_filename": "ppe_real_0011.jpg",
+    "confidence": 76.67,
+    "ppe": {
+      "helmet": true,
+      "vest": true,
+      "gloves": true,
+      "goggles": true
+    },
+    "has_violation": false,
+    "violation_types": [],
+    "event_time": "2026-03-20T08:19:25.388401",
+    "bbox": {
+      "x": 576,
+      "y": 390,
+      "w": 64,
+      "h": 121
+    }
+  },
+  {
+    "image_filename": "detected_ppe_real_0012.jpg",
+    "image_path": "C:\\Users\\91832\\Desktop\\Praveen\\backend\\detections\\detected_ppe_real_0012.jpg",
+    "original_filename": "ppe_real_0012.jpg",
+    "confidence": 72.15,
+    "ppe": {
+      "helmet": false,
+      "vest": false,
+      "gloves": true,
+      "goggles": true
+    },
+    "has_violation": true,
+    "violation_types": [
+      "No Helmet",
+      "No Safety Vest"
+    ],
+    "event_time": "2026-03-20T08:25:25.388401",
+    "bbox": {
+      "x": 640,
+      "y": 46,
+      "w": 610,
+      "h": 799
+    }
+  },
+  {
+    "image_filename": "detected_ppe_real_0013.jpg",
+    "image_path": "C:\\Users\\91832\\Desktop\\Praveen\\backend\\detections\\detected_ppe_real_0013.jpg",
+    "original_filename": "ppe_real_0013.jpg",
+    "confidence": 60.33,
+    "ppe": {
+      "helmet": true,
+      "vest": true,
+      "gloves": true,
+      "goggles": true
+    },
+    "has_violation": false,
+    "violation_types": [],
+    "event_time": "2026-03-20T08:31:25.388401",
+    "bbox": {
+      "x": 200,
+      "y": 30,
+      "w": 798,
+      "h": 812
+    }
+  },
+  {
+    "image_filename": "detected_ppe_real_0014.jpg",
+    "image_path": "C:\\Users\\91832\\Desktop\\Praveen\\backend\\detections\\detected_ppe_real_0014.jpg",
+    "original_filename": "ppe_real_0014.jpg",
+    "confidence": 73.24,
+    "ppe": {
+      "helmet": false,
+      "vest": false,
+      "gloves": true,
+      "goggles": false
+    },
+    "has_violation": true,
+    "violation_types": [
+      "No Helmet",
+      "No Safety Vest"
+    ],
+    "event_time": "2026-03-20T08:37:25.388401",
+    "bbox": {
+      "x": 655,
+      "y": 4,
+      "w": 620,
+      "h": 493
+    }
+  },
+  {
+    "image_filename": "detected_ppe_real_0015.jpg",
+    "image_path": "C:\\Users\\91832\\Desktop\\Praveen\\backend\\detections\\detected_ppe_real_0015.jpg",
+    "original_filename": "ppe_real_0015.jpg",
+    "confidence": 80.28,
+    "ppe": {
+      "helmet": true,
+      "vest": false,
+      "gloves": true,
+      "goggles": true
+    },
+    "has_violation": true,
+    "violation_types": [
+      "No Safety Vest"
+    ],
+    "event_time": "2026-03-20T08:43:25.388401",
+    "bbox": {
+      "x": 0,
+      "y": 2,
+      "w": 388,
+      "h": 344
+    }
+  },
+  {
+    "image_filename": "detected_ppe_real_0016.jpg",
+    "image_path": "C:\\Users\\91832\\Desktop\\Praveen\\backend\\detections\\detected_ppe_real_0016.jpg",
+    "original_filename": "ppe_real_0016.jpg",
+    "confidence": 43.26,
+    "ppe": {
+      "helmet": false,
+      "vest": false,
+      "gloves": false,
+      "goggles": true
+    },
+    "has_violation": true,
+    "violation_types": [
+      "No Helmet",
+      "No Safety Vest"
+    ],
+    "event_time": "2026-03-20T08:49:25.388401",
+    "bbox": {
+      "x": 235,
+      "y": 276,
+      "w": 290,
+      "h": 345
+    }
+  },
+  {
+    "image_filename": "detected_ppe_real_0017.jpg",
+    "image_path": "C:\\Users\\91832\\Desktop\\Praveen\\backend\\detections\\detected_ppe_real_0017.jpg",
+    "original_filename": "ppe_real_0017.jpg",
+    "confidence": 93.76,
+    "ppe": {
+      "helmet": true,
+      "vest": true,
+      "gloves": true,
+      "goggles": true
+    },
+    "has_violation": false,
+    "violation_types": [],
+    "event_time": "2026-03-20T08:55:25.388401",
+    "bbox": {
+      "x": 687,
+      "y": 68,
+      "w": 592,
+      "h": 777
+    }
+  }
+]

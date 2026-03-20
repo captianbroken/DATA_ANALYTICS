@@ -81,3 +81,9 @@ Thumbs.db
 # -----------------------------
 coverage/
 .cache/
+
+
+backend/training_data/
+yolov8n.pt
+venv/
+__pycache__/

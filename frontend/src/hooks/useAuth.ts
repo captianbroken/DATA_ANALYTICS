@@ -21,6 +21,30 @@ export interface AppSession {
 
 const SESSION_KEY = 'hyperspark_session';
 
+const clearStoredSession = () => {
+  localStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem('hyperspark_user');
+  localStorage.removeItem('hyperspark_fallback_auth');
+};
+
+const readStoredSession = () => {
+  const raw = localStorage.getItem(SESSION_KEY) ?? sessionStorage.getItem(SESSION_KEY);
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw) as AppSession;
+  } catch {
+    clearStoredSession();
+    return null;
+  }
+};
+
+const persistSession = (value: AppSession) => {
+  localStorage.setItem(SESSION_KEY, JSON.stringify(value));
+  sessionStorage.removeItem(SESSION_KEY);
+};
+
 export const useAuth = () => {
   const [session, setSession] = useState<AppSession | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
@@ -29,7 +53,6 @@ export const useAuth = () => {
   useEffect(() => {
     const loadAppUser = async (email?: string | null) => {
       if (!email || !isSupabaseConfigured) {
-        setAppUser(null);
         return null;
       }
 
@@ -43,63 +66,59 @@ export const useAuth = () => {
         ? userRecord.roles[0]?.role_name
         : ((userRecord?.roles ?? null) as unknown as { role_name?: string } | null)?.role_name;
 
-      if (userRecord && roleName && userRecord.status === 'active') {
-        const nextUser = {
-          id: userRecord.id,
-          email: userRecord.email,
-          name: userRecord.name,
-          role: roleName as 'admin' | 'user',
-          site_id: userRecord.site_id ?? null,
-          status: userRecord.status,
-        };
-        setAppUser(nextUser);
-        return nextUser;
+      if (!userRecord || !roleName || userRecord.status !== 'active') {
+        return null;
       }
 
-      setAppUser(null);
-      return null;
+      return {
+        id: userRecord.id,
+        email: userRecord.email,
+        name: userRecord.name,
+        role: roleName as 'admin' | 'user',
+        site_id: userRecord.site_id ?? null,
+        status: userRecord.status,
+      } satisfies AppUser;
     };
 
     const bootstrap = async () => {
-      localStorage.removeItem('hyperspark_user');
-      localStorage.removeItem('hyperspark_fallback_auth');
+      const stored = readStoredSession();
 
-      const raw = sessionStorage.getItem(SESSION_KEY);
-      if (!raw) {
+      if (!stored?.user?.email) {
+        clearStoredSession();
         setSession(null);
         setAppUser(null);
         setLoading(false);
         return;
       }
 
-      try {
-        const parsed = JSON.parse(raw) as AppSession;
-        if (parsed.app_user?.email && parsed.app_user?.id) {
-          setAppUser(parsed.app_user);
-          setSession(parsed);
-          setLoading(false);
-          return;
-        }
-
-        const nextUser = await loadAppUser(parsed.user?.email);
-        if (nextUser) {
-          const nextSession = { ...parsed, app_user: nextUser };
-          sessionStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
-          setSession(nextSession);
-        } else {
-          sessionStorage.removeItem(SESSION_KEY);
-          setSession(null);
-        }
-      } catch {
-        sessionStorage.removeItem(SESSION_KEY);
-        setSession(null);
-        setAppUser(null);
+      if (stored.app_user?.email && stored.app_user.id) {
+        setSession(stored);
+        setAppUser(stored.app_user);
+        setLoading(false);
+        return;
       }
 
+      const nextUser = await loadAppUser(stored.user.email);
+      if (!nextUser) {
+        clearStoredSession();
+        setSession(null);
+        setAppUser(null);
+        setLoading(false);
+        return;
+      }
+
+      const nextSession: AppSession = {
+        ...stored,
+        app_user: nextUser,
+      };
+
+      persistSession(nextSession);
+      setSession(nextSession);
+      setAppUser(nextUser);
       setLoading(false);
     };
 
-    bootstrap();
+    void bootstrap();
   }, []);
 
   return { session, appUser, loading };

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Search, Download, AlertTriangle, CheckCircle, RefreshCw } from 'lucide-react';
+import { Search, Download, AlertTriangle, CheckCircle, RefreshCw, Camera } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { selectUsersWithOptionalSite } from '../lib/userQueries';
+import { resolveSnapshotUrl } from '../lib/snapshotUrl';
+import { Modal } from '../components/ui/Modal';
 
 interface ViolationRecord {
   id: number;
@@ -11,7 +13,9 @@ interface ViolationRecord {
   violation_type: string;
   status: string;
   image_path: string | null;
-  cameras?: { site_id?: number | null; camera_name: string; sites?: { site_name: string } | { site_name: string }[] } | { site_id?: number | null; camera_name: string; sites?: { site_name: string } | { site_name: string }[] }[];
+  cameras?:
+    | { site_id?: number | null; camera_name: string; location?: string | null; sites?: { site_name: string } | { site_name: string }[] }
+    | { site_id?: number | null; camera_name: string; location?: string | null; sites?: { site_name: string } | { site_name: string }[] }[];
   employees?: { name: string } | { name: string }[];
 }
 
@@ -85,6 +89,7 @@ const ViolationsPage = () => {
   const [resolvingId, setResolvingId] = useState<number | null>(null);
   const [sites, setSites] = useState<SiteRecord[]>([]);
   const [users, setUsers] = useState<UserScope[]>([]);
+  const [snapshotPreview, setSnapshotPreview] = useState<{ url: string; title: string } | null>(null);
   const selectedSiteId = searchParams.get('site') ?? '';
   const selectedUserId = searchParams.get('user') ?? '';
 
@@ -100,7 +105,7 @@ const ViolationsPage = () => {
 
     let query = supabase
       .from('violations')
-      .select('id, timestamp, violation_type, status, image_path, cameras!inner(site_id, camera_name, sites(site_name)), employees(name)')
+      .select('id, timestamp, violation_type, status, image_path, cameras!inner(site_id, camera_name, location, sites(site_name)), employees(name)')
       .order('timestamp', { ascending: false });
 
     if (!isAdmin && assignedSiteId) {
@@ -349,6 +354,7 @@ const ViolationsPage = () => {
                 <th className="px-5 py-3 font-medium">Violation</th>
                 <th className="px-5 py-3 font-medium text-center">Severity</th>
                 <th className="px-5 py-3 font-medium text-center">Status</th>
+                <th className="px-5 py-3 font-medium text-center">Snapshot</th>
                 <th className="px-5 py-3 font-medium text-right">Action</th>
               </tr>
             </thead>
@@ -356,6 +362,7 @@ const ViolationsPage = () => {
               {filtered.map(violation => {
                 const resolved = violation.status === 'resolved';
                 const severity = deriveSeverity(violation.violation_type);
+                const snapshotUrl = resolveSnapshotUrl(violation.image_path);
 
                 return (
                   <tr key={violation.id} className="border-b border-slate-50 hover:bg-red-50/20 transition-colors">
@@ -363,6 +370,7 @@ const ViolationsPage = () => {
                     <td className="px-5 py-4">
                       <p className="font-medium text-slate-800 text-xs">{getSiteName(violation.cameras) || '-'}</p>
                       <p className="text-xs text-slate-400">{getCamera(violation.cameras)?.camera_name ?? '-'}</p>
+                      <p className="text-xs text-slate-400">{getCamera(violation.cameras)?.location ?? '-'}</p>
                     </td>
                     <td className="px-5 py-4 text-xs font-medium text-slate-700">{getEmployee(violation.employees)?.name ?? 'Unknown'}</td>
                     <td className="px-5 py-4">
@@ -379,6 +387,23 @@ const ViolationsPage = () => {
                         ? <span className="inline-flex items-center gap-1 text-green-600 text-xs"><CheckCircle size={12} />Resolved</span>
                         : <span className="inline-flex items-center gap-1 text-red-500 text-xs"><AlertTriangle size={12} />Open</span>}
                     </td>
+                    <td className="px-5 py-4 text-center">
+                      {snapshotUrl ? (
+                        <button
+                          type="button"
+                          onClick={() => setSnapshotPreview({
+                            url: snapshotUrl,
+                            title: `${violation.violation_type} - ${new Date(violation.timestamp).toLocaleString()}`,
+                          })}
+                          className="w-7 h-7 rounded bg-slate-100 inline-flex items-center justify-center hover:bg-slate-200 transition-colors"
+                          title="Open snapshot"
+                        >
+                          <Camera size={13} className="text-slate-500" />
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-400">-</span>
+                      )}
+                    </td>
                     <td className="px-5 py-4 text-right">
                       {!resolved && (
                         <button onClick={() => markResolved(violation.id)} disabled={resolvingId === violation.id} className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-1 rounded hover:bg-green-100 transition-colors font-medium disabled:opacity-50">
@@ -393,6 +418,34 @@ const ViolationsPage = () => {
           </table>
         )}
       </div>
+
+      <Modal
+        isOpen={Boolean(snapshotPreview)}
+        onClose={() => setSnapshotPreview(null)}
+        title={snapshotPreview?.title ?? 'Snapshot'}
+        maxWidth="max-w-5xl"
+      >
+        {snapshotPreview && (
+          <div className="space-y-4">
+            <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-950">
+              <img
+                src={snapshotPreview.url}
+                alt={snapshotPreview.title}
+                className="w-full h-auto max-h-[75vh] object-contain mx-auto"
+              />
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSnapshotPreview(null)}
+                className="px-4 py-2 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

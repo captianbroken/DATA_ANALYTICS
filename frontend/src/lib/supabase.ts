@@ -17,8 +17,9 @@ export const supabase = createClient(
   supabaseAnonKey || 'missing-anon-key',
   {
     auth: {
-      persistSession: false,
-      autoRefreshToken: false,
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
     },
   },
 );
