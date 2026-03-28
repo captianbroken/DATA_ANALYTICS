@@ -20,8 +20,9 @@ DATASET_DIR = BACKEND_DIR / "dataset"
 DETECTIONS_DIR = BACKEND_DIR / "detections"
 DETECTIONS_DIR.mkdir(parents=True, exist_ok=True)
 
-DEFAULT_MODEL_SOURCE = "hf://Hexmon/vyra-yolo-ppe-detection/best.pt"
-PPE_MODEL_SOURCE = os.getenv("PPE_MODEL_SOURCE", DEFAULT_MODEL_SOURCE)
+DEFAULT_MODEL_URL = "https://huggingface.co/Hexmon/vyra-yolo-ppe-detection/resolve/main/best.pt?download=true"
+LOCAL_MODEL_PATH = BACKEND_DIR.parent / "weights" / "best.pt"
+PPE_MODEL_SOURCE = os.getenv("PPE_MODEL_SOURCE", str(LOCAL_MODEL_PATH if LOCAL_MODEL_PATH.exists() else DEFAULT_MODEL_URL))
 
 CLASS_GROUPS = {
     "person": {"person"},

@@ -44,17 +44,20 @@ interface RecentEvent {
   event_time: string;
   event_type: string;
   confidence_score: number | null;
-  cameras?: { camera_name: string; sites?: { site_name: string } | { site_name: string }[] } | { camera_name: string; sites?: { site_name: string } | { site_name: string }[] }[];
-  employees?: { name: string } | { name: string }[];
+  camera_name?: string;
+  site_name?: string;
+  employee_name?: string;
+  employee_id?: number | null;
 }
 
 interface ViolationRecord {
   id: number;
-  timestamp: string;
+  violation_time: string;
   violation_type: string;
   status: string;
-  cameras?: { camera_name: string; sites?: { site_name: string } | { site_name: string }[] } | { camera_name: string; sites?: { site_name: string } | { site_name: string }[] }[];
-  employees?: { name: string } | { name: string }[];
+  camera_name?: string;
+  site_name?: string;
+  employee_name?: string;
 }
 
 interface CountsState {
@@ -303,6 +306,7 @@ const DashboardOverview = () => {
   const [recentViolations, setRecentViolations] = useState<ViolationRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(true);
+  const [refreshTick, setRefreshTick] = useState(0);
   const todayInputMax = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const [searchParams] = useSearchParams();
   const normalizedQuery = useMemo(() => (searchParams.get('q') ?? '').trim().toLowerCase(), [searchParams]);
@@ -319,29 +323,15 @@ const DashboardOverview = () => {
     }
     return `${formatDateLabel(dateRange.start)} - ${formatDateLabel(dateRange.end)}`;
   }, [dateRange, timeRange]);
-  const getCamera = (cameraRelation: RecentEvent['cameras']) => Array.isArray(cameraRelation) ? cameraRelation[0] : cameraRelation;
-  const getEmployee = (employeeRelation: RecentEvent['employees']) => Array.isArray(employeeRelation) ? employeeRelation[0] : employeeRelation;
-  const getSiteName = (cameraRelation: RecentEvent['cameras']) => {
-    const camera = getCamera(cameraRelation);
-    const sites = camera?.sites;
-    return Array.isArray(sites) ? (sites[0]?.site_name ?? '') : (sites?.site_name ?? '');
-  };
-  const getViolationCamera = (cameraRelation: ViolationRecord['cameras']) => Array.isArray(cameraRelation) ? cameraRelation[0] : cameraRelation;
-  const getViolationEmployee = (employeeRelation: ViolationRecord['employees']) => Array.isArray(employeeRelation) ? employeeRelation[0] : employeeRelation;
-  const getViolationSiteName = (cameraRelation: ViolationRecord['cameras']) => {
-    const camera = getViolationCamera(cameraRelation);
-    const sites = camera?.sites;
-    return Array.isArray(sites) ? (sites[0]?.site_name ?? '') : (sites?.site_name ?? '');
-  };
   const visibleRecentEvents = useMemo(() => {
     const base = modelFilter === 'All'
       ? recentEvents
       : recentEvents.filter(event => getEventCategory(event.event_type) === modelFilter);
     if (!normalizedQuery) return base;
     return base.filter(event => {
-      const site = getSiteName(event.cameras);
-      const camera = getCamera(event.cameras)?.camera_name ?? '';
-      const employee = getEmployee(event.employees)?.name ?? 'Unknown';
+      const site = event.site_name ?? '';
+      const camera = event.camera_name ?? '';
+      const employee = event.employee_name ?? 'Unknown';
       const eventType = event.event_type ?? '';
       return [site, camera, employee, eventType].some(value => value.toLowerCase().includes(normalizedQuery));
     });
@@ -350,13 +340,29 @@ const DashboardOverview = () => {
   const visibleRecentViolations = useMemo(() => {
     if (!normalizedQuery) return recentViolations;
     return recentViolations.filter(violation => {
-      const site = getViolationSiteName(violation.cameras);
-      const camera = getViolationCamera(violation.cameras)?.camera_name ?? '';
-      const employee = getViolationEmployee(violation.employees)?.name ?? 'Unknown';
+      const site = violation.site_name ?? '';
+      const camera = violation.camera_name ?? '';
+      const employee = violation.employee_name ?? 'Unknown';
       const violationType = violation.violation_type ?? '';
       return [site, camera, employee, violationType].some(value => value.toLowerCase().includes(normalizedQuery));
     });
   }, [recentViolations, normalizedQuery]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setRefreshTick(value => value + 1);
+    }, 15000);
+
+    const handleFocus = () => {
+      setRefreshTick(value => value + 1);
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -374,86 +380,34 @@ const DashboardOverview = () => {
           return;
         }
 
-        const sitesCountQuery = isAdmin
-          ? supabase.from('sites').select('*', { count: 'exact', head: true })
-          : supabase.from('sites').select('*', { count: 'exact', head: true }).eq('id', assignedSiteId as number);
-        const usersCountQuery = isAdmin
-          ? supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_deleted', false)
-          : supabase.from('users').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number);
-        const [
-          { count: sitesCount },
-          { count: usersCount },
-          { count: camerasCount },
-          { count: camerasOnlineCount },
-          { count: camerasOfflineCount },
-          { count: edgeServersCount },
-          { count: edgeServersOnlineCount },
-          { count: edgeServersOfflineCount },
-          { count: employeesCount },
-          { data: eventTypeData },
-          { count: unknownFacesCount },
-          { count: violationsCount },
-        ] = await Promise.all([
-          sitesCountQuery,
-          usersCountQuery,
-          (isAdmin
-            ? supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false)
-            : supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number)),
-          (isAdmin
-            ? supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('status', 'active')
-            : supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number).eq('status', 'active')),
-          (isAdmin
-            ? supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('status', 'inactive')
-            : supabase.from('cameras').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number).eq('status', 'inactive')),
-          (isAdmin
-            ? supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false)
-            : supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number)),
-          (isAdmin
-            ? supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('status', 'active')
-            : supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number).eq('status', 'active')),
-          (isAdmin
-            ? supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('status', 'inactive')
-            : supabase.from('edge_servers').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number).eq('status', 'inactive')),
-          (isAdmin
-            ? supabase.from('employees').select('*', { count: 'exact', head: true }).eq('is_deleted', false)
-            : supabase.from('employees').select('*', { count: 'exact', head: true }).eq('is_deleted', false).eq('site_id', assignedSiteId as number)),
-          (isAdmin
-            ? supabase.from('events').select('event_type').gte('event_time', startDate).lte('event_time', endDate)
-            : supabase.from('events').select('event_type').eq('site_id', assignedSiteId as number).gte('event_time', startDate).lte('event_time', endDate)),
-          (isAdmin
-            ? supabase.from('events').select('*', { count: 'exact', head: true }).gte('event_time', startDate).lte('event_time', endDate).is('employee_id', null)
-            : supabase.from('events').select('*', { count: 'exact', head: true }).eq('site_id', assignedSiteId as number).gte('event_time', startDate).lte('event_time', endDate).is('employee_id', null)),
-          (isAdmin
-            ? supabase.from('violations').select('id, cameras!inner(site_id)', { count: 'exact', head: true }).gte('timestamp', startDate).lte('timestamp', endDate)
-            : supabase.from('violations').select('id, cameras!inner(site_id)', { count: 'exact', head: true }).gte('timestamp', startDate).lte('timestamp', endDate).eq('cameras.site_id', assignedSiteId as number)),
-        ]);
-
-        const categoryCounts = { FRS: 0, PPE: 0, OTHER: 0 };
-        (eventTypeData ?? []).forEach((row: { event_type?: string | null }) => {
-          const category = getEventCategory(row.event_type);
-          if (category === 'FRS') categoryCounts.FRS += 1;
-          else if (category === 'PPE') categoryCounts.PPE += 1;
-          else categoryCounts.OTHER += 1;
+        const { data, error } = await supabase.rpc('get_dashboard_summary', {
+          p_site_id: isAdmin ? null : assignedSiteId,
+          p_start: startDate,
+          p_end: endDate,
         });
 
+        if (error) throw error;
+
+        const summary = Array.isArray(data) ? data[0] : data;
         setCounts({
-          sites: sitesCount ?? 0,
-          users: usersCount ?? 0,
-          cameras: camerasCount ?? 0,
-          cameras_online: camerasOnlineCount ?? 0,
-          cameras_offline: camerasOfflineCount ?? 0,
-          edge_servers: edgeServersCount ?? 0,
-          edge_servers_online: edgeServersOnlineCount ?? 0,
-          edge_servers_offline: edgeServersOfflineCount ?? 0,
-          employees: employeesCount ?? 0,
-          total_events: (eventTypeData?.length ?? 0),
-          frs_detections: categoryCounts.FRS,
-          unknown_faces: unknownFacesCount ?? 0,
-          ppe_detections: categoryCounts.PPE,
-          ppe_violations: violationsCount ?? 0,
+          sites: Number(summary?.sites ?? 0),
+          users: Number(summary?.users ?? 0),
+          cameras: Number(summary?.cameras ?? 0),
+          cameras_online: Number(summary?.cameras_online ?? 0),
+          cameras_offline: Number(summary?.cameras_offline ?? 0),
+          edge_servers: Number(summary?.edge_servers ?? 0),
+          edge_servers_online: Number(summary?.edge_servers_online ?? 0),
+          edge_servers_offline: Number(summary?.edge_servers_offline ?? 0),
+          employees: Number(summary?.employees ?? 0),
+          total_events: Number(summary?.total_events ?? 0),
+          frs_detections: Number(summary?.frs_detections ?? 0),
+          unknown_faces: Number(summary?.unknown_faces ?? 0),
+          ppe_detections: Number(summary?.ppe_detections ?? 0),
+          ppe_violations: Number(summary?.ppe_violations ?? 0),
         });
       } catch (error) {
         console.error('Dashboard stats fetch failed:', error);
+        setCounts(emptyCounts);
       } finally {
         setLoading(false);
       }
@@ -474,36 +428,21 @@ const DashboardOverview = () => {
         const bucketMap: Record<string, ChartPoint> = {};
         buckets.forEach(bucket => { bucketMap[bucket.time] = { ...bucket }; });
 
-        let eventsRawQuery = supabase.from('events').select('id, event_time, event_type').gte('event_time', startDate).lte('event_time', endDate).order('event_time', { ascending: true });
-        let violationsRawQuery = supabase.from('violations').select('id, timestamp, cameras!inner(site_id)').gte('timestamp', startDate).lte('timestamp', endDate).order('timestamp', { ascending: true });
-        let recentEventsQuery = supabase
-          .from('events')
-          .select('id, event_time, event_type, confidence_score, cameras(camera_name, sites(site_name)), employees(name)')
-          .gte('event_time', startDate)
-          .lte('event_time', endDate)
-          .order('event_time', { ascending: false })
-          .limit(8);
-        let recentViolationsQuery = supabase
-          .from('violations')
-          .select('id, timestamp, violation_type, status, cameras!inner(site_id, camera_name, sites(site_name)), employees(name)')
-          .gte('timestamp', startDate)
-          .lte('timestamp', endDate)
-          .order('timestamp', { ascending: false })
-          .limit(8);
-
-        if (!isAdmin && assignedSiteId) {
-          eventsRawQuery = eventsRawQuery.eq('site_id', assignedSiteId);
-          violationsRawQuery = violationsRawQuery.eq('cameras.site_id', assignedSiteId);
-          recentEventsQuery = recentEventsQuery.eq('site_id', assignedSiteId);
-          recentViolationsQuery = recentViolationsQuery.eq('cameras.site_id', assignedSiteId);
-        }
-
-        const [{ data: eventsRaw }, { data: violationsRaw }, { data: recentEventsRaw }, { data: recentViolationsRaw }] = await Promise.all([
-          eventsRawQuery,
-          violationsRawQuery,
-          recentEventsQuery,
-          recentViolationsQuery,
+        const [{ data: eventsRaw, error: eventsError }, { data: violationsRaw, error: violationsError }] = await Promise.all([
+          supabase.rpc('list_dashboard_events', {
+            p_site_id: isAdmin ? null : assignedSiteId,
+            p_start: startDate,
+            p_end: endDate,
+          }),
+          supabase.rpc('list_dashboard_violations', {
+            p_site_id: isAdmin ? null : assignedSiteId,
+            p_start: startDate,
+            p_end: endDate,
+          }),
         ]);
+
+        if (eventsError) throw eventsError;
+        if (violationsError) throw violationsError;
 
         (eventsRaw ?? []).forEach((event: { event_time: string; event_type?: string | null }) => {
           const key = getTimeKey(event.event_time, timeRange);
@@ -513,16 +452,19 @@ const DashboardOverview = () => {
           bucketMap[key].events += 1;
         });
 
-        (violationsRaw ?? []).forEach((violation: { timestamp: string }) => {
-          const key = getTimeKey(violation.timestamp, timeRange);
+        (violationsRaw ?? []).forEach((violation: { violation_time: string }) => {
+          const key = getTimeKey(violation.violation_time, timeRange);
           if (bucketMap[key]) bucketMap[key].violations += 1;
         });
 
         setChartData(buckets.map(bucket => bucketMap[bucket.time]));
-        setRecentEvents((((recentEventsRaw as unknown) as RecentEvent[]) ?? []));
-        setRecentViolations((((recentViolationsRaw as unknown) as ViolationRecord[]) ?? []));
+        setRecentEvents((((eventsRaw as unknown) as RecentEvent[]) ?? []).slice(0, 8));
+        setRecentViolations((((violationsRaw as unknown) as ViolationRecord[]) ?? []).slice(0, 8));
       } catch (error) {
         console.error('Dashboard chart fetch failed:', error);
+        setChartData(buildEmptyBuckets(timeRange, dateRange.start, dateRange.end));
+        setRecentEvents([]);
+        setRecentViolations([]);
       } finally {
         setChartLoading(false);
       }
@@ -530,7 +472,7 @@ const DashboardOverview = () => {
 
     fetchStats();
     fetchCharts();
-  }, [assignedSiteId, dateRange, endDate, isAdmin, modelFilter, startDate, timeRange]);
+  }, [assignedSiteId, dateRange, endDate, isAdmin, modelFilter, refreshTick, startDate, timeRange]);
 
   const handleExport = () => {
     const data = [
@@ -754,14 +696,14 @@ const DashboardOverview = () => {
                     visibleRecentEvents.map(event => (
                       <tr key={event.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
                         <td className="px-4 py-3 font-mono text-xs text-slate-600">{new Date(event.event_time).toLocaleString()}</td>
-                        <td className="px-4 py-3 text-xs text-slate-600">{getSiteName(event.cameras) || '-'}</td>
-                        <td className="px-4 py-3 text-xs text-slate-600">{getCamera(event.cameras)?.camera_name ?? '-'}</td>
+                        <td className="px-4 py-3 text-xs text-slate-600">{event.site_name || '-'}</td>
+                        <td className="px-4 py-3 text-xs text-slate-600">{event.camera_name ?? '-'}</td>
                         <td className="px-4 py-3">
                           <span className={`px-2 py-0.5 rounded text-xs font-semibold ${getEventCategory(event.event_type) === 'FRS' ? 'bg-blue-100 text-blue-700' : getEventCategory(event.event_type) === 'PPE' ? 'bg-cyan-100 text-cyan-700' : 'bg-slate-100 text-slate-600'}`}>
                             {getEventCategory(event.event_type) === 'OTHER' ? 'Other' : getEventCategory(event.event_type)}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-xs text-slate-600">{getEmployee(event.employees)?.name ?? 'Unknown'}</td>
+                        <td className="px-4 py-3 text-xs text-slate-600">{event.employee_name || 'Unknown'}</td>
                         <td className="px-4 py-3 text-xs text-slate-600">{event.event_type}</td>
                         <td className="px-4 py-3 text-right text-xs text-slate-500">
                           {event.confidence_score != null ? `${Math.round(Number(event.confidence_score))}%` : '-'}
@@ -807,11 +749,11 @@ const DashboardOverview = () => {
                   ) : (
                     visibleRecentViolations.map(violation => (
                       <tr key={violation.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
-                        <td className="px-4 py-3 font-mono text-xs text-slate-600">{new Date(violation.timestamp).toLocaleString()}</td>
-                        <td className="px-4 py-3 text-xs text-slate-600">{getViolationSiteName(violation.cameras) || '-'}</td>
-                        <td className="px-4 py-3 text-xs text-slate-600">{getViolationCamera(violation.cameras)?.camera_name ?? '-'}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-600">{new Date(violation.violation_time).toLocaleString()}</td>
+                        <td className="px-4 py-3 text-xs text-slate-600">{violation.site_name || '-'}</td>
+                        <td className="px-4 py-3 text-xs text-slate-600">{violation.camera_name ?? '-'}</td>
                         <td className="px-4 py-3 text-xs text-slate-600">{violation.violation_type}</td>
-                        <td className="px-4 py-3 text-xs text-slate-600">{getViolationEmployee(violation.employees)?.name ?? 'Unknown'}</td>
+                        <td className="px-4 py-3 text-xs text-slate-600">{violation.employee_name || 'Unknown'}</td>
                         <td className="px-4 py-3 text-right text-xs">
                           <span className={`px-2 py-0.5 rounded font-semibold ${violation.status === 'resolved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
                             {violation.status === 'resolved' ? 'Resolved' : 'Open'}

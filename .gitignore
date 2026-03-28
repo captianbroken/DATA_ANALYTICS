@@ -13,9 +13,13 @@ lerna-debug.log*
 # Node / Frontend
 # -----------------------------
 node_modules/
+frontend/node_modules/
 dist/
+frontend/dist/
 dist-ssr/
 *.local
+.vite/
+frontend/.vite/
 
 # Vite environment
 .env.local
@@ -45,6 +49,9 @@ dist/
 eggs/
 *.egg-info/
 pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # -----------------------------
 # Secrets / Environment files
@@ -81,9 +88,20 @@ Thumbs.db
 # -----------------------------
 coverage/
 .cache/
+tmp/
+temp/
 
 
 backend/training_data/
-yolov8n.pt
-venv/
-__pycache__/
+backend/dataset/
+backend/runs/
+backend/detections/
+backend/model_metrics.json
+backend/detection_results.json
+weights/
+*.pt
+*.pth
+*.onnx
+*.engine
+*.bin
+*.zip

@@ -3,7 +3,6 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, RefreshCw, Search, Edit2, Trash2, ShieldCheck, Shield, Eye, EyeOff, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { FormActions, FormField, Modal } from '../components/ui/Modal';
-import { selectUsersWithOptionalSite } from '../lib/userQueries';
 import { useAuth } from '../hooks/useAuth';
 
 interface RoleRecord {
@@ -26,7 +25,7 @@ interface UserRecord {
   last_login: string | null;
   role_id: number | null;
   site_id: number | null;
-  roles?: { role_name: 'admin' | 'user' } | { role_name: 'admin' | 'user' }[];
+  role_name?: 'admin' | 'user';
 }
 
 const emptyForm = {
@@ -39,8 +38,7 @@ const emptyForm = {
 };
 
 const getRoleName = (user: UserRecord) => {
-  if (Array.isArray(user.roles)) return user.roles[0]?.role_name ?? 'user';
-  return user.roles?.role_name ?? 'user';
+  return user.role_name ?? 'user';
 };
 
 const formatLastLogin = (value: string | null) => {
@@ -75,25 +73,25 @@ const UsersPage = () => {
     setLoading(true);
     setError('');
 
-    const [usersResult, { data: roleData, error: rolesError }, { data: siteData, error: sitesError }] = await Promise.all([
-      selectUsersWithOptionalSite<UserRecord>(
-        'id, auth_user_id, name, email, status, is_deleted, last_login, role_id, site_id, roles(role_name)',
-        'id, auth_user_id, name, email, status, is_deleted, last_login, role_id, roles(role_name)',
-        query => query.eq('is_deleted', false).order('created_at', { ascending: false }),
-      ),
-      supabase.from('roles').select('id, role_name').order('id'),
-      supabase.from('sites').select('id, site_name').order('site_name'),
+    const [
+      { data: userData, error: usersError },
+      { data: roleData, error: rolesError },
+      { data: siteData, error: sitesError },
+    ] = await Promise.all([
+      supabase.rpc('list_dashboard_users'),
+      supabase.rpc('list_dashboard_roles'),
+      supabase.rpc('list_dashboard_sites'),
     ]);
-
-    const { data: userData, error: usersError, siteAssignmentAvailable: nextSiteAssignmentAvailable } = usersResult;
 
     if (usersError) setError(usersError.message);
     if (rolesError && !usersError) setError(rolesError.message);
     if (sitesError && !usersError && !rolesError) setError(sitesError.message);
-    if (userData) setUsers(userData as UserRecord[]);
+    if (userData) {
+      setUsers((userData as UserRecord[]).filter(user => !user.is_deleted));
+    }
     if (roleData) setRoles(roleData as RoleRecord[]);
     if (siteData) setSites(siteData as SiteRecord[]);
-    setSiteAssignmentAvailable(nextSiteAssignmentAvailable);
+    setSiteAssignmentAvailable(true);
     setLoading(false);
   }, []);
 

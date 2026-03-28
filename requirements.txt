@@ -12,6 +12,8 @@ numpy
 # Web API
 flask
 flask-cors
+fastapi
+uvicorn
 
 # Data utilities
 requests

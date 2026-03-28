@@ -605,6 +605,479 @@ GRANT EXECUTE ON FUNCTION public.seed_admin_user(TEXT, TEXT, TEXT) TO anon, auth
 
 SELECT public.seed_admin_user('Admin User', 'admin@hyperspark.io', 'Admin@12345');
 
+CREATE OR REPLACE FUNCTION public.create_site(
+    p_site_name TEXT,
+    p_address TEXT DEFAULT NULL,
+    p_description TEXT DEFAULT NULL,
+    p_status TEXT DEFAULT 'active'
+)
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+DECLARE
+    v_site_id INTEGER;
+BEGIN
+    IF COALESCE(trim(p_site_name), '') = '' THEN
+        RAISE EXCEPTION 'Site name is required';
+    END IF;
+
+    INSERT INTO public.sites (site_name, address, description, status)
+    VALUES (
+        trim(p_site_name),
+        NULLIF(trim(COALESCE(p_address, '')), ''),
+        NULLIF(trim(COALESCE(p_description, '')), ''),
+        COALESCE(NULLIF(lower(trim(COALESCE(p_status, ''))), ''), 'active')
+    )
+    RETURNING id INTO v_site_id;
+
+    RETURN v_site_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.update_site(
+    p_site_id INTEGER,
+    p_site_name TEXT,
+    p_address TEXT DEFAULT NULL,
+    p_description TEXT DEFAULT NULL,
+    p_status TEXT DEFAULT 'active'
+)
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+BEGIN
+    IF COALESCE(trim(p_site_name), '') = '' THEN
+        RAISE EXCEPTION 'Site name is required';
+    END IF;
+
+    UPDATE public.sites
+    SET
+        site_name = trim(p_site_name),
+        address = NULLIF(trim(COALESCE(p_address, '')), ''),
+        description = NULLIF(trim(COALESCE(p_description, '')), ''),
+        status = COALESCE(NULLIF(lower(trim(COALESCE(p_status, ''))), ''), 'active')
+    WHERE id = p_site_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Site "%" was not found', p_site_id;
+    END IF;
+
+    RETURN p_site_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.delete_site(
+    p_site_id INTEGER
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+BEGIN
+    DELETE FROM public.sites
+    WHERE id = p_site_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Site "%" was not found', p_site_id;
+    END IF;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.create_site(TEXT, TEXT, TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.update_site(INTEGER, TEXT, TEXT, TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.delete_site(INTEGER) TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.list_dashboard_users()
+RETURNS TABLE (
+    id INTEGER,
+    auth_user_id UUID,
+    name TEXT,
+    email TEXT,
+    status TEXT,
+    is_deleted BOOLEAN,
+    last_login TIMESTAMPTZ,
+    role_id INTEGER,
+    site_id INTEGER,
+    role_name TEXT
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+    SELECT
+        u.id,
+        u.auth_user_id,
+        u.name::TEXT,
+        u.email::TEXT,
+        u.status::TEXT,
+        u.is_deleted,
+        u.last_login,
+        u.role_id,
+        u.site_id,
+        COALESCE(r.role_name, 'user')::TEXT AS role_name
+    FROM public.users u
+    LEFT JOIN public.roles r ON r.id = u.role_id
+    ORDER BY u.created_at DESC;
+$$;
+
+CREATE OR REPLACE FUNCTION public.list_dashboard_sites()
+RETURNS TABLE (
+    id INTEGER,
+    site_name TEXT,
+    address TEXT,
+    description TEXT,
+    status TEXT,
+    created_at TIMESTAMP
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+    SELECT
+        s.id,
+        s.site_name::TEXT,
+        COALESCE(s.address, '')::TEXT,
+        COALESCE(s.description, '')::TEXT,
+        COALESCE(s.status, 'active')::TEXT,
+        s.created_at
+    FROM public.sites s
+    ORDER BY s.created_at DESC;
+$$;
+
+CREATE OR REPLACE FUNCTION public.list_dashboard_roles()
+RETURNS TABLE (
+    id INTEGER,
+    role_name TEXT
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+    SELECT r.id, r.role_name::TEXT
+    FROM public.roles r
+    ORDER BY r.id;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.list_dashboard_users() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.list_dashboard_sites() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.list_dashboard_roles() TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.assign_user_site(
+    p_user_id INTEGER,
+    p_site_id INTEGER DEFAULT NULL
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+BEGIN
+    UPDATE public.users
+    SET site_id = p_site_id
+    WHERE id = p_user_id
+      AND is_deleted = FALSE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'User "%" was not found', p_user_id;
+    END IF;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.assign_user_site(INTEGER, INTEGER) TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.list_dashboard_edge_servers(
+    p_site_id INTEGER DEFAULT NULL
+)
+RETURNS TABLE (
+    id INTEGER,
+    site_id INTEGER,
+    server_name TEXT,
+    ip_address TEXT,
+    mac_address TEXT,
+    status TEXT,
+    is_deleted BOOLEAN,
+    created_at TIMESTAMP,
+    site_name TEXT
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+    SELECT
+        es.id,
+        es.site_id,
+        es.server_name::TEXT,
+        COALESCE(es.ip_address, '')::TEXT,
+        COALESCE(es.mac_address, '')::TEXT,
+        COALESCE(es.status, 'active')::TEXT,
+        es.is_deleted,
+        es.created_at,
+        COALESCE(s.site_name, '')::TEXT AS site_name
+    FROM public.edge_servers es
+    LEFT JOIN public.sites s ON s.id = es.site_id
+    WHERE es.is_deleted = FALSE
+      AND (p_site_id IS NULL OR es.site_id = p_site_id)
+    ORDER BY es.created_at DESC;
+$$;
+
+CREATE OR REPLACE FUNCTION public.create_edge_server(
+    p_site_id INTEGER,
+    p_server_name TEXT,
+    p_ip_address TEXT DEFAULT NULL,
+    p_mac_address TEXT DEFAULT NULL,
+    p_status TEXT DEFAULT 'active'
+)
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+DECLARE
+    v_server_id INTEGER;
+BEGIN
+    IF COALESCE(trim(p_server_name), '') = '' THEN
+        RAISE EXCEPTION 'Server name is required';
+    END IF;
+
+    INSERT INTO public.edge_servers (site_id, server_name, ip_address, mac_address, status)
+    VALUES (
+        p_site_id,
+        trim(p_server_name),
+        NULLIF(trim(COALESCE(p_ip_address, '')), ''),
+        NULLIF(trim(COALESCE(p_mac_address, '')), ''),
+        COALESCE(NULLIF(lower(trim(COALESCE(p_status, ''))), ''), 'active')
+    )
+    RETURNING id INTO v_server_id;
+
+    RETURN v_server_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.update_edge_server(
+    p_edge_server_id INTEGER,
+    p_site_id INTEGER,
+    p_server_name TEXT,
+    p_ip_address TEXT DEFAULT NULL,
+    p_mac_address TEXT DEFAULT NULL,
+    p_status TEXT DEFAULT 'active'
+)
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+BEGIN
+    IF COALESCE(trim(p_server_name), '') = '' THEN
+        RAISE EXCEPTION 'Server name is required';
+    END IF;
+
+    UPDATE public.edge_servers
+    SET
+        site_id = p_site_id,
+        server_name = trim(p_server_name),
+        ip_address = NULLIF(trim(COALESCE(p_ip_address, '')), ''),
+        mac_address = NULLIF(trim(COALESCE(p_mac_address, '')), ''),
+        status = COALESCE(NULLIF(lower(trim(COALESCE(p_status, ''))), ''), 'active')
+    WHERE id = p_edge_server_id
+      AND is_deleted = FALSE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Edge server "%" was not found', p_edge_server_id;
+    END IF;
+
+    RETURN p_edge_server_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.delete_edge_server(
+    p_edge_server_id INTEGER
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+BEGIN
+    UPDATE public.edge_servers
+    SET
+        is_deleted = TRUE,
+        status = 'inactive'
+    WHERE id = p_edge_server_id
+      AND is_deleted = FALSE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Edge server "%" was not found', p_edge_server_id;
+    END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_dashboard_summary(
+    p_site_id INTEGER DEFAULT NULL,
+    p_start TIMESTAMPTZ DEFAULT NULL,
+    p_end TIMESTAMPTZ DEFAULT NULL
+)
+RETURNS TABLE (
+    sites BIGINT,
+    users BIGINT,
+    cameras BIGINT,
+    cameras_online BIGINT,
+    cameras_offline BIGINT,
+    edge_servers BIGINT,
+    edge_servers_online BIGINT,
+    edge_servers_offline BIGINT,
+    employees BIGINT,
+    total_events BIGINT,
+    frs_detections BIGINT,
+    unknown_faces BIGINT,
+    ppe_detections BIGINT,
+    ppe_violations BIGINT
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+    WITH bounds AS (
+        SELECT
+            COALESCE(p_start, NOW() - INTERVAL '1 day') AS start_at,
+            COALESCE(p_end, NOW()) AS end_at
+    )
+    SELECT
+        (SELECT COUNT(*) FROM public.sites s WHERE p_site_id IS NULL OR s.id = p_site_id) AS sites,
+        (SELECT COUNT(*) FROM public.users u WHERE u.is_deleted = FALSE AND (p_site_id IS NULL OR u.site_id = p_site_id)) AS users,
+        (SELECT COUNT(*) FROM public.cameras c WHERE c.is_deleted = FALSE AND (p_site_id IS NULL OR c.site_id = p_site_id)) AS cameras,
+        (SELECT COUNT(*) FROM public.cameras c WHERE c.is_deleted = FALSE AND c.status = 'active' AND (p_site_id IS NULL OR c.site_id = p_site_id)) AS cameras_online,
+        (SELECT COUNT(*) FROM public.cameras c WHERE c.is_deleted = FALSE AND c.status = 'inactive' AND (p_site_id IS NULL OR c.site_id = p_site_id)) AS cameras_offline,
+        (SELECT COUNT(*) FROM public.edge_servers es WHERE es.is_deleted = FALSE AND (p_site_id IS NULL OR es.site_id = p_site_id)) AS edge_servers,
+        (SELECT COUNT(*) FROM public.edge_servers es WHERE es.is_deleted = FALSE AND es.status = 'active' AND (p_site_id IS NULL OR es.site_id = p_site_id)) AS edge_servers_online,
+        (SELECT COUNT(*) FROM public.edge_servers es WHERE es.is_deleted = FALSE AND es.status = 'inactive' AND (p_site_id IS NULL OR es.site_id = p_site_id)) AS edge_servers_offline,
+        (SELECT COUNT(*) FROM public.employees e WHERE e.is_deleted = FALSE AND (p_site_id IS NULL OR e.site_id = p_site_id)) AS employees,
+        (
+            SELECT COUNT(*)
+            FROM public.events ev, bounds b
+            WHERE ev.event_time >= b.start_at
+              AND ev.event_time <= b.end_at
+              AND (p_site_id IS NULL OR ev.site_id = p_site_id)
+        ) AS total_events,
+        (
+            SELECT COUNT(*)
+            FROM public.events ev, bounds b
+            WHERE ev.event_time >= b.start_at
+              AND ev.event_time <= b.end_at
+              AND UPPER(COALESCE(ev.event_type, '')) ~ '(FRS|FACE)'
+              AND (p_site_id IS NULL OR ev.site_id = p_site_id)
+        ) AS frs_detections,
+        (
+            SELECT COUNT(*)
+            FROM public.events ev, bounds b
+            WHERE ev.event_time >= b.start_at
+              AND ev.event_time <= b.end_at
+              AND ev.employee_id IS NULL
+              AND (p_site_id IS NULL OR ev.site_id = p_site_id)
+        ) AS unknown_faces,
+        (
+            SELECT COUNT(*)
+            FROM public.events ev, bounds b
+            WHERE ev.event_time >= b.start_at
+              AND ev.event_time <= b.end_at
+              AND UPPER(COALESCE(ev.event_type, '')) ~ '(PPE|HELMET|VEST|GLOVE|GOGGLES)'
+              AND (p_site_id IS NULL OR ev.site_id = p_site_id)
+        ) AS ppe_detections,
+        (
+            SELECT COUNT(*)
+            FROM public.violations v
+            JOIN public.cameras c ON c.id = v.camera_id, bounds b
+            WHERE v.timestamp >= b.start_at
+              AND v.timestamp <= b.end_at
+              AND (p_site_id IS NULL OR c.site_id = p_site_id)
+        ) AS ppe_violations;
+$$;
+
+CREATE OR REPLACE FUNCTION public.list_dashboard_events(
+    p_site_id INTEGER DEFAULT NULL,
+    p_start TIMESTAMPTZ DEFAULT NULL,
+    p_end TIMESTAMPTZ DEFAULT NULL
+)
+RETURNS TABLE (
+    id INTEGER,
+    event_time TIMESTAMP,
+    event_type TEXT,
+    confidence_score NUMERIC,
+    camera_name TEXT,
+    site_name TEXT,
+    employee_name TEXT,
+    employee_id INTEGER
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+    SELECT
+        ev.id,
+        ev.event_time,
+        ev.event_type::TEXT,
+        ev.confidence_score,
+        COALESCE(c.camera_name, '')::TEXT AS camera_name,
+        COALESCE(s.site_name, '')::TEXT AS site_name,
+        COALESCE(e.name, '')::TEXT AS employee_name,
+        ev.employee_id
+    FROM public.events ev
+    LEFT JOIN public.cameras c ON c.id = ev.camera_id
+    LEFT JOIN public.sites s ON s.id = ev.site_id
+    LEFT JOIN public.employees e ON e.id = ev.employee_id
+    WHERE (p_start IS NULL OR ev.event_time >= p_start)
+      AND (p_end IS NULL OR ev.event_time <= p_end)
+      AND (p_site_id IS NULL OR ev.site_id = p_site_id)
+    ORDER BY ev.event_time DESC;
+$$;
+
+CREATE OR REPLACE FUNCTION public.list_dashboard_violations(
+    p_site_id INTEGER DEFAULT NULL,
+    p_start TIMESTAMPTZ DEFAULT NULL,
+    p_end TIMESTAMPTZ DEFAULT NULL
+)
+RETURNS TABLE (
+    id INTEGER,
+    violation_time TIMESTAMP,
+    violation_type TEXT,
+    status TEXT,
+    camera_name TEXT,
+    site_name TEXT,
+    employee_name TEXT
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+    SELECT
+        v.id,
+        v.timestamp AS violation_time,
+        v.violation_type::TEXT,
+        COALESCE(v.status, 'open')::TEXT,
+        COALESCE(c.camera_name, '')::TEXT AS camera_name,
+        COALESCE(s.site_name, '')::TEXT AS site_name,
+        COALESCE(e.name, '')::TEXT AS employee_name
+    FROM public.violations v
+    LEFT JOIN public.cameras c ON c.id = v.camera_id
+    LEFT JOIN public.sites s ON s.id = c.site_id
+    LEFT JOIN public.employees e ON e.id = v.employee_id
+    WHERE (p_start IS NULL OR v.timestamp >= p_start)
+      AND (p_end IS NULL OR v.timestamp <= p_end)
+      AND (p_site_id IS NULL OR c.site_id = p_site_id)
+    ORDER BY v.timestamp DESC;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.list_dashboard_edge_servers(INTEGER) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_edge_server(INTEGER, TEXT, TEXT, TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.update_edge_server(INTEGER, INTEGER, TEXT, TEXT, TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.delete_edge_server(INTEGER) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_dashboard_summary(INTEGER, TIMESTAMPTZ, TIMESTAMPTZ) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.list_dashboard_events(INTEGER, TIMESTAMPTZ, TIMESTAMPTZ) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.list_dashboard_violations(INTEGER, TIMESTAMPTZ, TIMESTAMPTZ) TO anon, authenticated;
+
 -- Ensure API roles can read the schema and tables used by the dashboard.
 GRANT USAGE ON SCHEMA public TO anon, authenticated, authenticator;
 GRANT SELECT ON public.roles TO anon, authenticated, authenticator;

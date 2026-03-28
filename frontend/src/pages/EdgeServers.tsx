@@ -4,7 +4,6 @@ import { Plus, Search, Edit2, Trash2, Server, Wifi, WifiOff, Network, RefreshCw,
 import { supabase } from '../lib/supabase';
 import { FormActions, FormField, Modal } from '../components/ui/Modal';
 import { useAuth } from '../hooks/useAuth';
-import { selectUsersWithOptionalSite } from '../lib/userQueries';
 
 interface SiteRecord {
   id: number;
@@ -14,6 +13,7 @@ interface SiteRecord {
 interface UserOption {
   id: number;
   name: string;
+  is_deleted?: boolean;
   site_id?: number | null;
 }
 
@@ -31,7 +31,7 @@ interface EdgeServerRecord {
   status: string;
   is_deleted: boolean;
   created_at: string;
-  sites?: { site_name: string } | { site_name: string }[];
+  site_name?: string;
   camera_count?: number;
   linked_users?: number;
 }
@@ -76,30 +76,28 @@ const EdgeServersPage = () => {
       return;
     }
 
-    let serverQuery = supabase
-      .from('edge_servers')
-      .select('id, site_id, server_name, ip_address, mac_address, status, is_deleted, created_at, sites(site_name)')
-      .eq('is_deleted', false)
-      .order('created_at', { ascending: false });
-    let siteQuery = supabase.from('sites').select('id, site_name').order('site_name');
     let cameraQuery = supabase.from('cameras').select('edge_server_id, site_id').eq('is_deleted', false);
+    const siteScope = isAdmin ? null : assignedSiteId;
 
     if (!isAdmin && assignedSiteId) {
-      serverQuery = serverQuery.eq('site_id', assignedSiteId);
-      siteQuery = siteQuery.eq('id', assignedSiteId);
       cameraQuery = cameraQuery.eq('site_id', assignedSiteId);
     }
 
-    const [{ data: serverData, error: serverError }, { data: siteData }, { data: cameraData }, usersResult] = await Promise.all([
-      serverQuery,
-      siteQuery,
+    const [
+      { data: serverData, error: serverError },
+      { data: siteData, error: siteError },
+      { data: cameraData },
+      { data: userData, error: userError },
+    ] = await Promise.all([
+      supabase.rpc('list_dashboard_edge_servers', { p_site_id: siteScope }),
+      supabase.rpc('list_dashboard_sites'),
       cameraQuery,
-      isAdmin
-        ? selectUsersWithOptionalSite<UserOption>('id, name, site_id', 'id, name', query => query.eq('is_deleted', false).not('site_id', 'is', null).order('name'))
-        : Promise.resolve({ data: [], error: null, siteAssignmentAvailable: true }),
+      isAdmin ? supabase.rpc('list_dashboard_users') : Promise.resolve({ data: [], error: null }),
     ]);
 
     if (serverError) setError(serverError.message);
+    if (siteError && !serverError) setError(siteError.message);
+    if (userError && !serverError && !siteError) setError(userError.message);
 
     const counts = new Map<number, number>();
     const usersBySite = new Map<number, number>();
@@ -107,7 +105,7 @@ const EdgeServersPage = () => {
       if (!camera.edge_server_id) return;
       counts.set(camera.edge_server_id, (counts.get(camera.edge_server_id) ?? 0) + 1);
     });
-    (usersResult.data as { site_id?: number | null }[] | null)?.forEach(user => {
+    ((userData as UserOption[] | null) ?? []).filter(user => !user.is_deleted).forEach(user => {
       if (!user.site_id) return;
       usersBySite.set(user.site_id, (usersBySite.get(user.site_id) ?? 0) + 1);
     });
@@ -122,13 +120,15 @@ const EdgeServersPage = () => {
       );
     }
 
-    if (siteData) setSites(siteData as SiteRecord[]);
-    setUsers((usersResult.data as UserOption[] | null) ?? []);
+    if (siteData) {
+      const scopedSites = (siteData as SiteRecord[]).filter(site => isAdmin || site.id === assignedSiteId);
+      setSites(scopedSites);
+    }
+    setUsers((((userData as UserOption[] | null) ?? []).filter(user => !user.is_deleted)));
     setLoading(false);
   }, [assignedSiteId, isAdmin]);
 
-  const getSiteName = (siteRelation: EdgeServerRecord['sites']) =>
-    Array.isArray(siteRelation) ? (siteRelation[0]?.site_name ?? '-') : (siteRelation?.site_name ?? '-');
+  const getSiteName = (siteName?: string) => siteName || '-';
 
   useEffect(() => {
     fetchAll();
@@ -150,7 +150,7 @@ const EdgeServersPage = () => {
     const selectedUser = users.find(user => String(user.id) === selectedUserId);
     const matchSearch =
       server.server_name.toLowerCase().includes(search.toLowerCase()) ||
-      getSiteName(server.sites).toLowerCase().includes(search.toLowerCase()) ||
+      getSiteName(server.site_name).toLowerCase().includes(search.toLowerCase()) ||
       (server.ip_address ?? '').toLowerCase().includes(search.toLowerCase());
     const matchStatus = !statusFilter || server.status === statusFilter;
     const matchUser = !selectedUser || server.site_id === selectedUser.site_id;
@@ -177,7 +177,14 @@ const EdgeServersPage = () => {
     setSaving(true);
     setError('');
 
-    const { error: insertError } = await supabase.from('edge_servers').insert([buildPayload()]);
+    const payload = buildPayload();
+    const { error: insertError } = await supabase.rpc('create_edge_server', {
+      p_site_id: payload.site_id,
+      p_server_name: payload.server_name,
+      p_ip_address: payload.ip_address,
+      p_mac_address: payload.mac_address,
+      p_status: payload.status,
+    });
 
     if (insertError) {
       setError(insertError.message);
@@ -196,10 +203,15 @@ const EdgeServersPage = () => {
     setSaving(true);
     setError('');
 
-    const { error: updateError } = await supabase
-      .from('edge_servers')
-      .update(buildPayload())
-      .eq('id', selected.id);
+    const payload = buildPayload();
+    const { error: updateError } = await supabase.rpc('update_edge_server', {
+      p_edge_server_id: selected.id,
+      p_site_id: payload.site_id,
+      p_server_name: payload.server_name,
+      p_ip_address: payload.ip_address,
+      p_mac_address: payload.mac_address,
+      p_status: payload.status,
+    });
 
     if (updateError) {
       setError(updateError.message);
@@ -217,10 +229,9 @@ const EdgeServersPage = () => {
     setSaving(true);
     setError('');
 
-    const { error: updateError } = await supabase
-      .from('edge_servers')
-      .update({ is_deleted: true, status: 'inactive' })
-      .eq('id', selected.id);
+    const { error: updateError } = await supabase.rpc('delete_edge_server', {
+      p_edge_server_id: selected.id,
+    });
 
     if (updateError) {
       setError(updateError.message);
@@ -387,7 +398,7 @@ const EdgeServersPage = () => {
                     </div>
                     <div>
                       <p className="font-bold text-slate-800">{server.server_name}</p>
-                      <p className="text-xs text-slate-400">{getSiteName(server.sites) || 'No site assigned'}</p>
+                      <p className="text-xs text-slate-400">{getSiteName(server.site_name) || 'No site assigned'}</p>
                     </div>
                   </div>
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${online ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
@@ -471,7 +482,7 @@ const EdgeServersPage = () => {
           <div className="space-y-3">
             {[
               ['Server Name', selected.server_name],
-              ['Site', getSiteName(selected.sites)],
+              ['Site', getSiteName(selected.site_name)],
               ['IP Address', selected.ip_address ?? '-'],
               ['MAC Address', selected.mac_address ?? '-'],
               ['Status', selected.status === 'active' ? 'Online' : 'Offline'],

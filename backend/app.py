@@ -173,7 +173,7 @@ def get_event_ppe(event_id: int):
 
 
 if __name__ == "__main__":
-    print("\n🚀 PPE Detection API starting at http://localhost:5000")
+    print("\nPPE Detection API starting at http://localhost:5000")
     print("   Endpoints: /health  /api/events  /api/violations  /api/stats  /api/detections/<file>")
     print("   CORS: enabled for localhost:5173\n")
     app.run(host="0.0.0.0", port=5000, debug=False)

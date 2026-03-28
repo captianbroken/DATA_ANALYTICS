@@ -4,7 +4,6 @@ import { Plus, Search, Eye, Edit2, Trash2, MapPin, Wifi, WifiOff, RefreshCw } fr
 import { supabase } from '../lib/supabase';
 import { Modal, FormField, FormActions } from '../components/ui/Modal';
 import { useAuth } from '../hooks/useAuth';
-import { selectUsersWithOptionalSite } from '../lib/userQueries';
 
 interface Site {
   id: number;
@@ -21,6 +20,8 @@ interface Site {
 interface UserScope {
   id: number;
   name: string;
+  status?: string;
+  is_deleted?: boolean;
   site_id?: number | null;
 }
 
@@ -57,30 +58,30 @@ const SitesPage = () => {
       return;
     }
 
-    let query = supabase.from('sites').select('*').order('created_at', { ascending: false });
-    if (!isAdmin && assignedSiteId) {
-      query = query.eq('id', assignedSiteId);
-    }
-
-    const [{ data, error: sitesError }, usersResult] = await Promise.all([
-      query,
-      isAdmin
-        ? selectUsersWithOptionalSite<UserScope>('id, name, site_id', 'id, name', userQuery => userQuery.eq('is_deleted', false).not('site_id', 'is', null).order('name'))
-        : Promise.resolve({ data: [], error: null, siteAssignmentAvailable: true }),
+    const [
+      { data: siteData, error: sitesError },
+      { data: userData, error: usersError },
+    ] = await Promise.all([
+      supabase.rpc('list_dashboard_sites'),
+      isAdmin ? supabase.rpc('list_dashboard_users') : Promise.resolve({ data: [], error: null }),
     ]);
 
     if (sitesError) setError(sitesError.message);
-    setSiteAssignmentAvailable(usersResult.siteAssignmentAvailable);
-    setUsers((usersResult.data as UserScope[] | null) ?? []);
+    if (usersError && !sitesError) setError(usersError.message);
+    setSiteAssignmentAvailable(true);
 
-    if (!sitesError && data) {
+    const nextUsers = ((userData as UserScope[] | null) ?? []).filter(user => !user.is_deleted);
+    setUsers(nextUsers);
+
+    if (!sitesError && siteData) {
       const usersBySite = new Map<number, number>();
-      (usersResult.data as UserScope[] | null)?.forEach(user => {
+      nextUsers.forEach(user => {
         if (!user.site_id) return;
         usersBySite.set(user.site_id, (usersBySite.get(user.site_id) ?? 0) + 1);
       });
 
-      setSites((data as Site[]).map(site => ({ ...site, linked_users: usersBySite.get(site.id) ?? 0 })));
+      const scopedSites = (siteData as Site[]).filter(site => isAdmin || site.id === assignedSiteId);
+      setSites(scopedSites.map(site => ({ ...site, linked_users: usersBySite.get(site.id) ?? 0 })));
     }
 
     setLoading(false);
@@ -131,22 +132,34 @@ const SitesPage = () => {
 
   const handleAdd = async (event: React.FormEvent) => {
     event.preventDefault();
-    const { data: insertData, error: insertError } = await supabase.from('sites').insert([{ 
-      site_name: form.site_name,
-      address: form.address,
-      description: form.description,
-      status: form.status
-    }]).select();
+    setSaving(true);
+    setError('');
+
+    const { data: insertData, error: insertError } = await supabase.rpc('create_site', {
+      p_site_name: form.site_name,
+      p_address: form.address,
+      p_description: form.description,
+      p_status: form.status,
+    });
 
     if (insertError) {
       setError(insertError.message);
     } else {
-      if (form.user_id && insertData && insertData[0]) {
-        await supabase.from('users').update({ site_id: insertData[0].id }).eq('id', Number(form.user_id));
+      const nextSiteId = Array.isArray(insertData) ? insertData[0] : insertData;
+      if (form.user_id && nextSiteId) {
+        const { error: assignError } = await supabase.rpc('assign_user_site', {
+          p_user_id: Number(form.user_id),
+          p_site_id: Number(nextSiteId),
+        });
+        if (assignError) {
+          setError(assignError.message);
+          setSaving(false);
+          return;
+        }
       }
       setShowAdd(false);
       setForm(emptySite);
-      fetchSites();
+      await fetchSites();
     }
 
     setSaving(false);
@@ -159,15 +172,29 @@ const SitesPage = () => {
     setSaving(true);
     setError('');
 
-    const { error: updateError } = await supabase.from('sites').update({ ...form }).eq('id', selected.id);
+    const { error: updateError } = await supabase.rpc('update_site', {
+      p_site_id: selected.id,
+      p_site_name: form.site_name,
+      p_address: form.address,
+      p_description: form.description,
+      p_status: form.status,
+    });
     if (updateError) {
       setError(updateError.message);
     } else {
       if (form.user_id) {
-        await supabase.from('users').update({ site_id: selected.id }).eq('id', Number(form.user_id));
+        const { error: assignError } = await supabase.rpc('assign_user_site', {
+          p_user_id: Number(form.user_id),
+          p_site_id: selected.id,
+        });
+        if (assignError) {
+          setError(assignError.message);
+          setSaving(false);
+          return;
+        }
       }
       setShowEdit(false);
-      fetchSites();
+      await fetchSites();
     }
 
     setSaving(false);
@@ -176,9 +203,17 @@ const SitesPage = () => {
   const handleDelete = async () => {
     if (!selected) return;
     setSaving(true);
-    await supabase.from('sites').delete().eq('id', selected.id);
-    setShowDelete(false);
-    fetchSites();
+    setError('');
+
+    const { error: deleteError } = await supabase.rpc('delete_site', {
+      p_site_id: selected.id,
+    });
+    if (deleteError) {
+      setError(deleteError.message);
+    } else {
+      setShowDelete(false);
+      await fetchSites();
+    }
     setSaving(false);
   };
 
