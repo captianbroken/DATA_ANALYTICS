@@ -4,6 +4,7 @@ import { Plus, Search, Eye, Edit2, Trash2, Video, Wifi, WifiOff, RefreshCw, Serv
 import { supabase } from '../lib/supabase';
 import { Modal, FormField, FormActions } from '../components/ui/Modal';
 import { useAuth } from '../hooks/useAuth';
+import { usePermissions } from '../hooks/usePermissions';
 import { selectUsersWithOptionalSite } from '../lib/userQueries';
 
 interface Camera {
@@ -177,6 +178,7 @@ const CamForm = ({
 const CamerasPage = () => {
   const { appUser } = useAuth();
   const isAdmin = appUser?.role === 'admin';
+  const { canWrite, isReadOnly } = usePermissions();
   const assignedSiteId = appUser?.site_id ?? null;
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
@@ -478,11 +480,12 @@ const CamerasPage = () => {
         </div>
         <div className="flex gap-2">
           <button onClick={fetchAll} className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"><RefreshCw size={16} className={loading ? 'animate-spin' : ''} /></button>
-          <button onClick={() => { setForm({ ...emptyForm, site_id: assignedSiteId ? String(assignedSiteId) : '' }); setError(''); setRtspTestStatus('idle'); setRtspTestUrl(''); setRtspTestMessage(''); setRtspTestEdgeServerId(null); setShowAdd(true); }} style={{ backgroundColor: '#005baa' }} className="text-white px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-medium hover:opacity-90 shadow-sm">
+          {canWrite && <button onClick={() => { setForm({ ...emptyForm, site_id: assignedSiteId ? String(assignedSiteId) : '' }); setError(''); setRtspTestStatus('idle'); setRtspTestUrl(''); setRtspTestMessage(''); setRtspTestEdgeServerId(null); setShowAdd(true); }} style={{ backgroundColor: '#005baa' }} className="text-white px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-medium hover:opacity-90 shadow-sm">
             <Plus size={16} /> Add Camera
-          </button>
+          </button>}
         </div>
       </div>
+      {isReadOnly && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">Read-only access: you can view cameras, but you cannot add, edit, delete, or test connections.</div>}
 
       {error && (
         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -590,7 +593,7 @@ const CamerasPage = () => {
                   </td>
                   <td className="px-5 py-4">
                     <div className="flex justify-end gap-1">
-                      <button 
+                      {canWrite && <button 
                         onClick={() => testConnection(camera)} 
                         disabled={testingId === camera.id}
                         className={`group relative flex items-center justify-center w-8 h-8 rounded-lg transition-all ${testingId === camera.id ? 'bg-blue-100 text-blue-600' : 'bg-slate-50 text-slate-400 hover:bg-blue-600 hover:text-white hover:shadow-md'}`}
@@ -598,10 +601,10 @@ const CamerasPage = () => {
                       >
                         {testingId === camera.id ? <RefreshCw size={15} className="animate-spin" /> : <Wifi size={15} />}
                         <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">Test Connection</span>
-                      </button>
+                      </button>}
                       <button onClick={() => { setSelected(camera); setShowView(true); }} className="p-1.5 rounded-lg hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors" title="View"><Eye size={15} /></button>
-                      <button onClick={() => { setSelected(camera); setForm({ camera_name: camera.camera_name, rtsp_url: camera.rtsp_url ?? '', location: camera.location ?? '', status: camera.status ?? 'active', ai_model: camera.ai_model ?? 'PPE', site_id: String(camera.site_id ?? ''), edge_server_id: String(camera.edge_server_id ?? '') }); setRtspTestStatus('idle'); setRtspTestUrl(''); setRtspTestMessage(''); setRtspTestEdgeServerId(null); setShowEdit(true); }} className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors" title="Edit"><Edit2 size={15} /></button>
-                      <button onClick={() => { setSelected(camera); setShowDelete(true); }} className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors" title="Delete"><Trash2 size={15} /></button>
+                      {canWrite && <button onClick={() => { setSelected(camera); setForm({ camera_name: camera.camera_name, rtsp_url: camera.rtsp_url ?? '', location: camera.location ?? '', status: camera.status ?? 'active', ai_model: camera.ai_model ?? 'PPE', site_id: String(camera.site_id ?? ''), edge_server_id: String(camera.edge_server_id ?? '') }); setRtspTestStatus('idle'); setRtspTestUrl(''); setRtspTestMessage(''); setRtspTestEdgeServerId(null); setShowEdit(true); }} className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors" title="Edit"><Edit2 size={15} /></button>}
+                      {canWrite && <button onClick={() => { setSelected(camera); setShowDelete(true); }} className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors" title="Delete"><Trash2 size={15} /></button>}
                     </div>
                   </td>
                 </tr>

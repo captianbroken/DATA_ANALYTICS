@@ -16,7 +16,7 @@ export const Modal = ({ isOpen, onClose, title, children, maxWidth = 'max-w-lg' 
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" />
       <div
-        className={`relative bg-white rounded-xl shadow-2xl w-full ${maxWidth} max-h-[90vh] overflow-y-auto`}
+        className={`relative bg-white rounded-xl shadow-2xl w-full ${maxWidth} max-h-[90vh] overflow-y-auto text-slate-800 [&_input]:text-slate-800 [&_input]:placeholder:text-slate-400 [&_select]:text-slate-800 [&_textarea]:text-slate-800`}
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
@@ -50,7 +50,7 @@ export const FormField = ({ label, type = 'text', value, onChange, placeholder, 
       <select
         value={value}
         onChange={e => onChange(e.target.value)}
-        className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 bg-white"
+        className="w-full px-3 py-2.5 text-sm text-slate-800 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 bg-white"
       >
         <option value="">Select {label}</option>
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -62,7 +62,7 @@ export const FormField = ({ label, type = 'text', value, onChange, placeholder, 
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
         required={required}
-        className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
+        className="w-full px-3 py-2.5 text-sm text-slate-800 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
       />
     )}
   </div>

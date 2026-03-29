@@ -4,6 +4,7 @@ import { Plus, Search, Eye, Edit2, Trash2, UserCheck, UserX, RefreshCw, FolderOp
 import { supabase } from '../lib/supabase';
 import { Modal, FormField, FormActions } from '../components/ui/Modal';
 import { useAuth } from '../hooks/useAuth';
+import { usePermissions } from '../hooks/usePermissions';
 import { selectUsersWithOptionalSite } from '../lib/userQueries';
 
 interface Employee {
@@ -32,6 +33,7 @@ const emptyForm = { name: '', employee_code: '', department: '', designation: ''
 const EmployeesPage = () => {
   const { appUser } = useAuth();
   const isAdmin = appUser?.role === 'admin';
+  const { canWrite, isReadOnly } = usePermissions();
   const assignedSiteId = appUser?.site_id ?? null;
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
@@ -356,11 +358,12 @@ const EmployeesPage = () => {
           <button onClick={fetchAll} className="p-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
           </button>
-          <button onClick={() => { setForm({ ...emptyForm, site_id: assignedSiteId ? String(assignedSiteId) : '' }); setError(''); resetFaceUploads(); setShowAdd(true); }} style={{ backgroundColor: '#005baa' }} className="text-white px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-medium hover:opacity-90 shadow-sm">
+          {canWrite && <button onClick={() => { setForm({ ...emptyForm, site_id: assignedSiteId ? String(assignedSiteId) : '' }); setError(''); resetFaceUploads(); setShowAdd(true); }} style={{ backgroundColor: '#005baa' }} className="text-white px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-medium hover:opacity-90 shadow-sm">
             <Plus size={16} /> Add Employee
-          </button>
+          </button>}
         </div>
       </div>
+      {isReadOnly && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">Read-only access: you can view employees, but you cannot add, edit, or delete them.</div>}
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">
@@ -449,8 +452,8 @@ const EmployeesPage = () => {
                   <td className="px-5 py-4">
                     <div className="flex justify-end gap-1">
                       <button onClick={() => { setSelected(employee); setShowView(true); }} className="p-1.5 rounded-lg hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors" title="View"><Eye size={15} /></button>
-                      <button onClick={() => { setSelected(employee); setForm({ name: employee.name, employee_code: employee.employee_code ?? '', department: employee.department ?? '', designation: employee.designation ?? '', site_id: String(employee.site_id ?? ''), has_spectacles: employee.has_spectacles ? 'yes' : 'no' }); resetFaceUploads(); setShowEdit(true); }} className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors" title="Edit"><Edit2 size={15} /></button>
-                      <button onClick={() => { setSelected(employee); setShowDelete(true); }} className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors" title="Delete"><Trash2 size={15} /></button>
+                      {canWrite && <button onClick={() => { setSelected(employee); setForm({ name: employee.name, employee_code: employee.employee_code ?? '', department: employee.department ?? '', designation: employee.designation ?? '', site_id: String(employee.site_id ?? ''), has_spectacles: employee.has_spectacles ? 'yes' : 'no' }); resetFaceUploads(); setShowEdit(true); }} className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors" title="Edit"><Edit2 size={15} /></button>}
+                      {canWrite && <button onClick={() => { setSelected(employee); setShowDelete(true); }} className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors" title="Delete"><Trash2 size={15} /></button>}
                     </div>
                   </td>
                 </tr>

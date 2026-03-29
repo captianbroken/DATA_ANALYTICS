@@ -106,10 +106,24 @@ def ensure_ppe_types(cur) -> dict:
 
 
 def clear_existing_detection_data(cur):
-    cur.execute("DELETE FROM violations")
-    cur.execute("DELETE FROM event_ppe_status")
-    cur.execute("DELETE FROM events")
-    print("  Cleared existing events, event_ppe_status, and violations")
+    cur.execute(
+        """
+        DELETE FROM violations v
+        USING events e
+        WHERE v.event_id = e.id
+          AND e.event_type = 'PPE Detection'
+        """
+    )
+    cur.execute(
+        """
+        DELETE FROM event_ppe_status eps
+        USING events e
+        WHERE eps.event_id = e.id
+          AND e.event_type = 'PPE Detection'
+        """
+    )
+    cur.execute("DELETE FROM events WHERE event_type = 'PPE Detection'")
+    print("  Cleared existing PPE events, event_ppe_status, and violations")
 
 
 def seed(detection_results: list | None = None):
@@ -144,6 +158,7 @@ def seed(detection_results: list | None = None):
                     bbox = result.get("bbox", {})
                     has_violation = result.get("has_violation", False)
                     ppe = result.get("ppe", {})
+                    missing_items = set(result.get("missing_items", []))
 
                     cur.execute(
                         """
@@ -169,6 +184,9 @@ def seed(detection_results: list | None = None):
                         ppe_type_id = ppe_type_ids.get(ppe_name)
                         if ppe_type_id is None:
                             continue
+                        is_worn = bool(ppe.get(key, False))
+                        if missing_items:
+                            is_worn = key not in missing_items
                         cur.execute(
                             """
                             INSERT INTO event_ppe_status (event_id, ppe_type_id, is_worn)
@@ -176,7 +194,7 @@ def seed(detection_results: list | None = None):
                             ON CONFLICT (event_id, ppe_type_id) DO UPDATE
                             SET is_worn = EXCLUDED.is_worn
                             """,
-                            (event_id, ppe_type_id, bool(ppe.get(key, False))),
+                            (event_id, ppe_type_id, is_worn),
                         )
 
                     if not has_violation:

@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255) DEFAULT 'supabase_auth_managed',
     role_id INTEGER REFERENCES roles(id) ON DELETE SET NULL,
     site_id INTEGER REFERENCES sites(id) ON DELETE SET NULL,
+    access_level VARCHAR(50) DEFAULT 'full_access',
     status VARCHAR(50) DEFAULT 'active',
     is_deleted BOOLEAN DEFAULT FALSE,
     last_login TIMESTAMPTZ,
@@ -57,7 +58,7 @@ CREATE TABLE IF NOT EXISTS cameras (
     location VARCHAR(200),
     rtsp_url TEXT,
     description TEXT,
-    ai_model VARCHAR(50) DEFAULT 'FRS+PPE',
+    ai_model VARCHAR(50) DEFAULT 'PPE',
     status VARCHAR(50) DEFAULT 'active',
     is_deleted BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

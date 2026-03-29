@@ -25,16 +25,25 @@ interface UserRecord {
   last_login: string | null;
   role_id: number | null;
   site_id: number | null;
+  access_level?: 'full_access' | 'read_only';
   role_name?: 'admin' | 'user';
 }
+
+const getRoleLabel = (roleName: 'admin' | 'user') => {
+  return roleName === 'admin' ? 'Admin' : 'Account';
+};
 
 const emptyForm = {
   name: '',
   email: '',
   password: '',
   role_name: 'user',
+  access_level: 'read_only',
   status: 'active',
   site_id: '',
+  new_site_name: '',
+  new_site_address: '',
+  new_site_description: '',
 };
 
 const getRoleName = (user: UserRecord) => {
@@ -100,12 +109,26 @@ const UsersPage = () => {
   }, [fetchAll]);
 
   const queryParam = useMemo(() => searchParams.get('q') ?? '', [searchParams]);
+  const focusedUserId = useMemo(() => {
+    const raw = searchParams.get('focus');
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isNaN(parsed) ? null : parsed;
+  }, [searchParams]);
 
   useEffect(() => {
     if (queryParam !== search) {
       setSearch(queryParam);
     }
   }, [queryParam]);
+
+  useEffect(() => {
+    if (!focusedUserId || users.length === 0) return;
+    const focusedUser = users.find(user => user.id === focusedUserId);
+    if (focusedUser) {
+      setOverviewUser(focusedUser);
+    }
+  }, [focusedUserId, users]);
 
   const siteNameById = useMemo(
     () => new Map(sites.map(site => [site.id, site.site_name])),
@@ -117,6 +140,8 @@ const UsersPage = () => {
     if (!user.site_id) return 'Unassigned';
     return siteNameById.get(user.site_id) ?? 'Unassigned';
   };
+
+  const isCreatingInlineSite = form.site_id === '__create_new__';
 
   const filtered = users.filter(user => {
     const roleName = getRoleName(user);
@@ -148,6 +173,16 @@ const UsersPage = () => {
 
   const openOverview = (user: UserRecord) => {
     setOverviewUser(user);
+    const params = new URLSearchParams(searchParams);
+    params.set('focus', String(user.id));
+    setSearchParams(params);
+  };
+
+  const closeOverview = () => {
+    setOverviewUser(null);
+    const params = new URLSearchParams(searchParams);
+    params.delete('focus');
+    setSearchParams(params);
   };
 
   const handleAdd = async (event: React.FormEvent) => {
@@ -155,15 +190,45 @@ const UsersPage = () => {
     setSaving(true);
     setError('');
 
+    let resolvedSiteId: number | null = null;
+
+    if (siteAssignmentAvailable && form.role_name === 'user') {
+      if (isCreatingInlineSite) {
+        if (!form.new_site_name.trim()) {
+          setError('Client/Site name is required when creating a new client.');
+          setSaving(false);
+          return;
+        }
+
+        const { data: createdSiteId, error: createSiteError } = await supabase.rpc('create_site', {
+          p_site_name: form.new_site_name.trim(),
+          p_address: form.new_site_address.trim() || null,
+          p_description: form.new_site_description.trim() || null,
+          p_status: 'active',
+        });
+
+        if (createSiteError) {
+          setError(createSiteError.message);
+          setSaving(false);
+          return;
+        }
+
+        resolvedSiteId = Number(createdSiteId);
+      } else {
+        resolvedSiteId = Number(form.site_id || 0) || null;
+      }
+    }
+
     const createPayload: Record<string, any> = {
       p_name: form.name.trim(),
       p_email: form.email.trim().toLowerCase(),
       p_password: form.password,
       p_role_name: form.role_name,
       p_status: form.status,
+      p_access_level: form.role_name === 'admin' ? 'full_access' : form.access_level,
     };
     if (siteAssignmentAvailable) {
-      createPayload.p_site_id = form.role_name === 'user' ? Number(form.site_id || 0) || null : null;
+      createPayload.p_site_id = form.role_name === 'user' ? resolvedSiteId : null;
     }
 
     const { error: rpcError } = await supabase.rpc('create_dashboard_user', createPayload);
@@ -192,6 +257,7 @@ const UsersPage = () => {
       p_password: form.password.trim() || null,
       p_role_name: form.role_name,
       p_status: form.status,
+      p_access_level: form.role_name === 'admin' ? 'full_access' : form.access_level,
     };
     if (siteAssignmentAvailable) {
       updatePayload.p_site_id = form.role_name === 'user' ? Number(form.site_id || 0) || null : null;
@@ -284,10 +350,15 @@ const UsersPage = () => {
         <FormField
           label="Role"
           value={form.role_name}
-          onChange={value => setForm(current => ({ ...current, role_name: value, site_id: value === 'admin' ? '' : current.site_id }))}
+          onChange={value => setForm(current => ({
+            ...current,
+            role_name: value,
+            site_id: value === 'admin' ? '' : current.site_id,
+            access_level: value === 'admin' ? 'full_access' : 'read_only',
+          }))}
           options={(roles.length ? roles : [{ id: 1, role_name: 'admin' }, { id: 2, role_name: 'user' }]).map(role => ({
             value: role.role_name,
-            label: role.role_name,
+            label: getRoleLabel(role.role_name),
           }))}
         />
         <FormField
@@ -300,13 +371,49 @@ const UsersPage = () => {
           ]}
         />
       </div>
+      <FormField
+        label="Access Level"
+        value={form.role_name === 'admin' ? 'full_access' : form.access_level}
+        onChange={value => setForm(current => ({ ...current, access_level: value as 'full_access' | 'read_only' }))}
+        options={[
+          { value: 'full_access', label: 'Full Access' },
+          { value: 'read_only', label: 'Read Only' },
+        ]}
+      />
       {siteAssignmentAvailable && (
         <FormField
-          label="Assigned Site"
+          label="Client / Site"
           value={form.site_id}
           onChange={value => setForm(current => ({ ...current, site_id: value }))}
-          options={sites.map(site => ({ value: String(site.id), label: site.site_name }))}
+          options={[
+            ...sites.map(site => ({ value: String(site.id), label: site.site_name })),
+            { value: '__create_new__', label: '+ Create New Client / Site' },
+          ]}
         />
+      )}
+      {siteAssignmentAvailable && form.role_name === 'user' && isCreatingInlineSite && (
+        <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-4 space-y-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Create Client / Site</p>
+          <FormField
+            label="Client / Site Name"
+            value={form.new_site_name}
+            onChange={value => setForm(current => ({ ...current, new_site_name: value }))}
+            placeholder="e.g. Apollo Clinic - Chennai"
+            required
+          />
+          <FormField
+            label="Address"
+            value={form.new_site_address}
+            onChange={value => setForm(current => ({ ...current, new_site_address: value }))}
+            placeholder="e.g. Anna Nagar, Chennai"
+          />
+          <FormField
+            label="Description"
+            value={form.new_site_description}
+            onChange={value => setForm(current => ({ ...current, new_site_description: value }))}
+            placeholder="Optional client/site notes"
+          />
+        </div>
       )}
       {!siteAssignmentAvailable && (
         <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
@@ -315,15 +422,15 @@ const UsersPage = () => {
       )}
       {siteAssignmentAvailable && sites.length === 0 && (
         <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-          No sites exist yet. You can create the user now and assign a site later.
+          No sites exist yet. Create the first client/site here and the account will be linked automatically.
         </p>
       )}
       {form.role_name === 'user' && siteAssignmentAvailable && (
         <p className="text-xs text-slate-400">
-          Standard users can be assigned to a site now or later. If a site is assigned, they will only see that site's cameras, edge servers, employees, events, violations, and dashboard data.
+          For first-time onboarding, you can create the client/site here itself. Use Full Access for managers who should update records, or Read Only for supervisors who should only monitor data.
         </p>
       )}
-      <FormActions onCancel={closeForms} loading={saving} submitLabel={isEdit ? 'Update User' : 'Create User'} />
+      <FormActions onCancel={closeForms} loading={saving} submitLabel={isEdit ? 'Update Account' : 'Create Account'} />
     </form>
   );
 
@@ -331,8 +438,8 @@ const UsersPage = () => {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">System Users</h1>
-          <p className="text-slate-500 text-sm mt-1">Manage dashboard access and roles</p>
+          <h1 className="text-2xl font-bold text-slate-800">Account Access</h1>
+          <p className="text-slate-500 text-sm mt-1">Manage login accounts, access, and roles</p>
         </div>
         <div className="flex gap-2">
           <button
@@ -354,7 +461,7 @@ const UsersPage = () => {
             style={{ backgroundColor: '#005baa' }}
             className="text-white px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity shadow-sm"
           >
-            <Plus size={16} /> Add User
+            <Plus size={16} /> Add Account
           </button>
         </div>
       </div>
@@ -388,7 +495,7 @@ const UsersPage = () => {
         <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm">
           <Shield size={13} className="text-slate-400" />
           <select value={roleFilter} onChange={event => setRoleFilter(event.target.value as 'All' | 'admin' | 'user')} className="text-slate-700 text-sm bg-transparent outline-none">
-            {['All', 'admin', 'user'].map(option => <option key={option} value={option}>{option}</option>)}
+            {['All', 'admin', 'user'].map(option => <option key={option} value={option}>{option === 'user' ? 'account' : option}</option>)}
           </select>
         </div>
         <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm">
@@ -402,7 +509,7 @@ const UsersPage = () => {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm">
-          <p className="text-xs text-slate-500">Total Users</p>
+          <p className="text-xs text-slate-500">Total Accounts</p>
           <p className="text-2xl font-bold text-slate-800 mt-1">{totalUsers}</p>
         </div>
         <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm">
@@ -410,7 +517,7 @@ const UsersPage = () => {
           <p className="text-2xl font-bold text-blue-600 mt-1">{adminUsers}</p>
         </div>
         <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm">
-          <p className="text-xs text-slate-500">Standard Users</p>
+          <p className="text-xs text-slate-500">Accounts</p>
           <p className="text-2xl font-bold text-slate-800 mt-1">{standardUsers}</p>
         </div>
         <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm">
@@ -436,7 +543,7 @@ const UsersPage = () => {
               </div>
             </div>
             <button
-              onClick={() => setOverviewUser(null)}
+              onClick={closeOverview}
               className="p-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
               title="Close overview"
             >
@@ -446,8 +553,9 @@ const UsersPage = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mt-4">
             {[
-                ['Role', getRoleName(overviewUser)],
+              ['Role', getRoleName(overviewUser)],
               ['Assigned Site', getUserSiteName(overviewUser)],
+              ['Access Level', overviewUser.access_level === 'read_only' ? 'Read Only' : 'Full Access'],
               ['Status', overviewUser.status],
               ['Last Login', formatLastLogin(overviewUser.last_login)],
               ['Auth Linked', overviewUser.auth_user_id ? 'Yes' : 'No'],
@@ -475,6 +583,7 @@ const UsersPage = () => {
                   email: overviewUser.email,
                   password: '',
                   role_name: getRoleName(overviewUser),
+                  access_level: overviewUser.access_level ?? 'read_only',
                   status: overviewUser.status ?? 'active',
                   site_id: String(overviewUser.site_id ?? ''),
                 });
@@ -494,8 +603,8 @@ const UsersPage = () => {
           <div className="p-12 text-center text-slate-400 animate-pulse">Loading from database...</div>
         ) : filtered.length === 0 ? (
           <div className="p-12 text-center">
-            <p className="text-slate-500 font-medium">No users found</p>
-            <p className="text-slate-400 text-sm mt-1">Create your first login-enabled user above.</p>
+            <p className="text-slate-500 font-medium">No accounts found</p>
+            <p className="text-slate-400 text-sm mt-1">Create your first login-enabled account above.</p>
           </div>
         ) : (
           <table className="w-full text-sm text-left">
@@ -522,7 +631,13 @@ const UsersPage = () => {
                         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold">
                           {user.name.split(' ').map(part => part[0]).slice(0, 2).join('')}
                         </div>
-                        <p className="font-medium text-slate-800">{user.name}</p>
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/users/${user.id}`)}
+                          className="font-medium text-slate-800 hover:text-blue-600 transition-colors text-left"
+                        >
+                          {user.name}
+                        </button>
                       </div>
                     </td>
                     <td className="px-5 py-4 text-slate-500 text-xs">{user.email}</td>
@@ -530,7 +645,7 @@ const UsersPage = () => {
                     <td className="px-5 py-4 text-center">
                       <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${roleName === 'admin' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>
                         {roleName === 'admin' ? <ShieldCheck size={10} /> : <Shield size={10} />}
-                        {roleName}
+                        {getRoleLabel(roleName)}
                       </span>
                     </td>
                     <td className="px-5 py-4 text-center">
@@ -558,6 +673,7 @@ const UsersPage = () => {
                                   email: user.email,
                                   password: '',
                                   role_name: getRoleName(user),
+                                  access_level: user.access_level ?? 'read_only',
                                   status: user.status ?? 'active',
                                   site_id: String(user.site_id ?? ''),
                                 });
@@ -591,16 +707,16 @@ const UsersPage = () => {
         )}
       </div>
 
-      <Modal isOpen={showAdd} onClose={closeForms} title="Add User">
+      <Modal isOpen={showAdd} onClose={closeForms} title="Add Account">
         {renderUserForm(handleAdd)}
       </Modal>
 
 
-      <Modal isOpen={showEdit} onClose={closeForms} title={`Edit: ${selected?.name}`}>
+      <Modal isOpen={showEdit} onClose={closeForms} title={`Edit Account: ${selected?.name}`}>
         {renderUserForm(handleEdit, true)}
       </Modal>
 
-      <Modal isOpen={showDelete} onClose={() => setShowDelete(false)} title="Remove User" maxWidth="max-w-sm">
+      <Modal isOpen={showDelete} onClose={() => setShowDelete(false)} title="Remove Account" maxWidth="max-w-sm">
         <div className="text-center space-y-4">
           {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-lg">{error}</p>}
           <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto">
@@ -608,7 +724,7 @@ const UsersPage = () => {
           </div>
           <div>
             <p className="font-medium text-slate-800">Remove "{selected?.name}"?</p>
-            <p className="text-sm text-slate-500 mt-1">This will deactivate the login and archive the user row.</p>
+            <p className="text-sm text-slate-500 mt-1">This will deactivate the login and archive the account row.</p>
           </div>
           <div className="flex gap-3">
             <button

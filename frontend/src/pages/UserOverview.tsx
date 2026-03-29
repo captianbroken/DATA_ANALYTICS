@@ -9,11 +9,13 @@ interface UserRecord {
   name: string;
   email: string;
   status: string;
+  is_deleted?: boolean;
   last_login: string | null;
   role_id: number | null;
   site_id: number | null;
-  roles?: { role_name: 'admin' | 'user' } | { role_name: 'admin' | 'user' }[];
-  sites?: { site_name: string } | { site_name: string }[];
+  access_level?: 'full_access' | 'read_only';
+  role_name?: 'admin' | 'user';
+  site_name?: string | null;
   created_at?: string | null;
 }
 
@@ -23,9 +25,12 @@ interface EventRecord {
   event_type: string;
 }
 
+const getRoleLabel = (roleName: 'admin' | 'user') => {
+  return roleName === 'admin' ? 'Admin' : 'Account';
+};
+
 const getRoleName = (user: UserRecord) => {
-  if (Array.isArray(user.roles)) return user.roles[0]?.role_name ?? 'user';
-  return user.roles?.role_name ?? 'user';
+  return user.role_name ?? 'user';
 };
 
 const formatDate = (value: string | null | undefined) => {
@@ -36,8 +41,7 @@ const formatDate = (value: string | null | undefined) => {
 const getSiteName = (user: UserRecord | null) => {
   if (!user) return 'Unassigned';
   if (getRoleName(user) === 'admin') return 'Global access';
-  if (Array.isArray(user.sites)) return user.sites[0]?.site_name ?? 'Unassigned';
-  return user.sites?.site_name ?? 'Unassigned';
+  return user.site_name ?? 'Unassigned';
 };
 
 const UserOverview = () => {
@@ -65,11 +69,10 @@ const UserOverview = () => {
       setLoading(true);
       setError('');
 
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('id, auth_user_id, name, email, status, last_login, role_id, site_id, roles(role_name), sites(site_name), created_at')
-        .eq('id', userId)
-        .single();
+      const [{ data: usersData, error: userError }, { data: sitesData }] = await Promise.all([
+        supabase.rpc('list_dashboard_users'),
+        supabase.rpc('list_dashboard_sites'),
+      ]);
 
       if (!mounted) return;
 
@@ -79,7 +82,22 @@ const UserOverview = () => {
         return;
       }
 
-      const typedUser = userData as UserRecord;
+      const dashboardUsers = ((usersData as UserRecord[] | null) ?? []).filter(item => !item.is_deleted);
+      const siteNameById = new Map<number, string>(
+        (((sitesData as { id: number; site_name: string }[] | null) ?? []).map(site => [site.id, site.site_name] as const)),
+      );
+      const baseUser = dashboardUsers.find(item => item.id === userId);
+      if (!baseUser) {
+        setError('User not found.');
+        setLoading(false);
+        return;
+      }
+
+      const typedUser: UserRecord = {
+        ...baseUser,
+        role_name: baseUser.role_name ?? 'user',
+        site_name: baseUser.site_id ? (siteNameById.get(baseUser.site_id) ?? null) : null,
+      };
       const scopedSiteId = typedUser.site_id;
       const isAdminUser = getRoleName(typedUser) === 'admin';
 
@@ -120,7 +138,7 @@ const UserOverview = () => {
   if (loading) {
     return (
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-10 text-center text-slate-400 animate-pulse">
-        Loading user overview...
+        Loading account overview...
       </div>
     );
   }
@@ -145,7 +163,7 @@ const UserOverview = () => {
           <ArrowLeft size={14} /> Back
         </button>
         <span>/</span>
-        <Link to="/users" className="hover:text-slate-700">Users</Link>
+        <Link to="/users" className="hover:text-slate-700">Accounts</Link>
         <span>/</span>
         <span className="text-slate-700 font-medium">{user.name}</span>
       </div>
@@ -160,7 +178,7 @@ const UserOverview = () => {
           <div className="flex flex-wrap items-center gap-3 mt-3">
             <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${roleName === 'admin' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>
               {roleName === 'admin' ? <ShieldCheck size={10} /> : <Shield size={10} />}
-              {roleName}
+              {getRoleLabel(roleName)}
             </span>
             <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
               {isActive ? <UserCheck size={10} /> : <UserX size={10} />}
@@ -170,15 +188,19 @@ const UserOverview = () => {
         </div>
         <div className="flex gap-3">
           <Link to={`/users?focus=${user.id}`} className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
-            Manage User
+            Manage Account
           </Link>
         </div>
       </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
           <p className="text-xs text-slate-500">Assigned Site</p>
           <p className="text-sm font-medium text-slate-800 mt-2">{getSiteName(user)}</p>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
+          <p className="text-xs text-slate-500">Access Level</p>
+          <p className="text-sm font-medium text-slate-800 mt-2">{user.access_level === 'read_only' ? 'Read Only' : 'Full Access'}</p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
           <p className="text-xs text-slate-500">Last Login</p>
@@ -210,7 +232,12 @@ const UserOverview = () => {
           <h3 className="font-bold text-slate-800 flex items-center gap-2">
             <Activity size={16} className="text-blue-500" /> Recent Site Events
           </h3>
-          <Link to="/events" className="text-xs text-blue-600">View all events</Link>
+          <Link
+            to={user.site_id ? `/events?user=${user.id}&site=${user.site_id}` : `/events?user=${user.id}`}
+            className="text-xs text-blue-600"
+          >
+            View all events
+          </Link>
         </div>
         {recentEvents.length === 0 ? (
           <div className="p-8 text-center text-slate-400 text-sm">No recent events found for this user's assigned site.</div>

@@ -10,7 +10,11 @@ ON CONFLICT (role_name) DO NOTHING;
 ALTER TABLE public.users
     ADD COLUMN IF NOT EXISTS auth_user_id UUID,
     ADD COLUMN IF NOT EXISTS site_id INTEGER,
+    ADD COLUMN IF NOT EXISTS access_level VARCHAR(50) DEFAULT 'full_access',
     ADD COLUMN IF NOT EXISTS last_login TIMESTAMPTZ;
+
+UPDATE public.users
+SET access_level = COALESCE(NULLIF(lower(trim(COALESCE(access_level, ''))), ''), 'full_access');
 
 ALTER TABLE public.users
     ALTER COLUMN password_hash DROP NOT NULL;
@@ -100,7 +104,8 @@ CREATE OR REPLACE FUNCTION public.create_dashboard_user(
     p_password TEXT,
     p_role_name TEXT DEFAULT 'user',
     p_status TEXT DEFAULT 'active',
-    p_site_id INTEGER DEFAULT NULL
+    p_site_id INTEGER DEFAULT NULL,
+    p_access_level TEXT DEFAULT 'full_access'
 )
 RETURNS INTEGER
 LANGUAGE plpgsql
@@ -113,6 +118,7 @@ DECLARE
     v_name TEXT := trim(p_name);
     v_role_name TEXT := COALESCE(NULLIF(lower(trim(p_role_name)), ''), 'user');
     v_status TEXT := COALESCE(NULLIF(lower(trim(p_status)), ''), 'active');
+    v_access_level TEXT := COALESCE(NULLIF(lower(trim(p_access_level)), ''), 'full_access');
     v_role_id INTEGER;
     v_auth_user_id UUID;
     v_public_user_id INTEGER;
@@ -135,6 +141,14 @@ BEGIN
 
     IF v_role_id IS NULL THEN
         RAISE EXCEPTION 'Role "%" was not found', v_role_name;
+    END IF;
+
+    IF v_access_level NOT IN ('full_access', 'read_only') THEN
+        RAISE EXCEPTION 'Access level "%" was not found', v_access_level;
+    END IF;
+
+    IF v_role_name = 'admin' THEN
+        v_access_level := 'full_access';
     END IF;
 
     SELECT id
@@ -268,6 +282,7 @@ BEGIN
         password_hash,
         role_id,
         site_id,
+        access_level,
         status,
         is_deleted
     )
@@ -278,6 +293,7 @@ BEGIN
         crypt(trim(p_password), gen_salt('bf')),
         v_role_id,
         p_site_id,
+        v_access_level,
         v_status,
         FALSE
     )
@@ -288,6 +304,7 @@ BEGIN
         password_hash = EXCLUDED.password_hash,
         role_id = EXCLUDED.role_id,
         site_id = EXCLUDED.site_id,
+        access_level = EXCLUDED.access_level,
         status = EXCLUDED.status,
         is_deleted = FALSE;
 
@@ -307,7 +324,8 @@ CREATE OR REPLACE FUNCTION public.update_dashboard_user(
     p_password TEXT DEFAULT NULL,
     p_role_name TEXT DEFAULT 'user',
     p_status TEXT DEFAULT 'active',
-    p_site_id INTEGER DEFAULT NULL
+    p_site_id INTEGER DEFAULT NULL,
+    p_access_level TEXT DEFAULT 'full_access'
 )
 RETURNS INTEGER
 LANGUAGE plpgsql
@@ -320,6 +338,7 @@ DECLARE
     v_name TEXT := trim(p_name);
     v_role_name TEXT := COALESCE(NULLIF(lower(trim(p_role_name)), ''), 'user');
     v_status TEXT := COALESCE(NULLIF(lower(trim(p_status)), ''), 'active');
+    v_access_level TEXT := COALESCE(NULLIF(lower(trim(p_access_level)), ''), 'full_access');
     v_role_id INTEGER;
     v_auth_user_id UUID;
 BEGIN
@@ -337,6 +356,14 @@ BEGIN
 
     IF v_role_id IS NULL THEN
         RAISE EXCEPTION 'Role "%" was not found', v_role_name;
+    END IF;
+
+    IF v_access_level NOT IN ('full_access', 'read_only') THEN
+        RAISE EXCEPTION 'Access level "%" was not found', v_access_level;
+    END IF;
+
+    IF v_role_name = 'admin' THEN
+        v_access_level := 'full_access';
     END IF;
 
     SELECT auth_user_id
@@ -461,6 +488,7 @@ BEGIN
         END,
         role_id = v_role_id,
         site_id = p_site_id,
+        access_level = v_access_level,
         status = v_status,
         is_deleted = FALSE
     WHERE id = p_user_id;
@@ -509,6 +537,7 @@ RETURNS TABLE (
     name TEXT,
     role TEXT,
     site_id INTEGER,
+    access_level TEXT,
     status TEXT
 )
 LANGUAGE plpgsql
@@ -523,6 +552,7 @@ BEGIN
         u.name::TEXT,
         r.role_name::TEXT,
         u.site_id,
+        COALESCE(u.access_level, 'full_access')::TEXT,
         u.status::TEXT
     FROM public.users u
     LEFT JOIN public.roles r ON r.id = u.role_id
@@ -589,15 +619,15 @@ AS $$
 DECLARE
     v_user_id INTEGER;
 BEGIN
-    SELECT public.create_dashboard_user(p_name, p_email, p_password, 'admin', 'active', NULL)
+    SELECT public.create_dashboard_user(p_name, p_email, p_password, 'admin', 'active', NULL, 'full_access')
     INTO v_user_id;
 
     RETURN v_user_id;
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.create_dashboard_user(TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.update_dashboard_user(INTEGER, TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_dashboard_user(TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.update_dashboard_user(INTEGER, TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER, TEXT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.soft_delete_dashboard_user(INTEGER) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.dashboard_login(TEXT, TEXT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.change_dashboard_password(INTEGER, TEXT) TO anon, authenticated;
@@ -702,6 +732,7 @@ RETURNS TABLE (
     last_login TIMESTAMPTZ,
     role_id INTEGER,
     site_id INTEGER,
+    access_level TEXT,
     role_name TEXT
 )
 LANGUAGE sql
@@ -718,6 +749,7 @@ AS $$
         u.last_login,
         u.role_id,
         u.site_id,
+        COALESCE(u.access_level, 'full_access')::TEXT,
         COALESCE(r.role_name, 'user')::TEXT AS role_name
     FROM public.users u
     LEFT JOIN public.roles r ON r.id = u.role_id

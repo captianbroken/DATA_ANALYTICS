@@ -91,13 +91,27 @@ coverage/
 tmp/
 temp/
 
+# -----------------------------
+# Local App Runtime Artifacts
+# -----------------------------
+ppe_violations/
+ppe_system.log
+ppe_violations_log.csv
+cameras.json
 
+# -----------------------------
+# Backend Generated Data
+# -----------------------------
 backend/training_data/
 backend/dataset/
 backend/runs/
 backend/detections/
 backend/model_metrics.json
 backend/detection_results.json
+
+# -----------------------------
+# Model Weights / Large Artifacts
+# -----------------------------
 weights/
 *.pt
 *.pth

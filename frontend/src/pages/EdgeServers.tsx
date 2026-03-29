@@ -4,6 +4,7 @@ import { Plus, Search, Edit2, Trash2, Server, Wifi, WifiOff, Network, RefreshCw,
 import { supabase } from '../lib/supabase';
 import { FormActions, FormField, Modal } from '../components/ui/Modal';
 import { useAuth } from '../hooks/useAuth';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface SiteRecord {
   id: number;
@@ -47,6 +48,7 @@ const emptyForm = {
 const EdgeServersPage = () => {
   const { appUser } = useAuth();
   const isAdmin = appUser?.role === 'admin';
+  const { canWrite, isReadOnly } = usePermissions();
   const assignedSiteId = appUser?.site_id ?? null;
   const [servers, setServers] = useState<EdgeServerRecord[]>([]);
   const [sites, setSites] = useState<SiteRecord[]>([]);
@@ -306,7 +308,7 @@ const EdgeServersPage = () => {
           >
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
           </button>
-          <button
+          {canWrite && <button
             onClick={() => {
               setForm({ ...emptyForm, site_id: assignedSiteId ? String(assignedSiteId) : '' });
               setError('');
@@ -316,9 +318,10 @@ const EdgeServersPage = () => {
             className="text-white px-4 py-2 flex items-center gap-2 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity shadow-sm"
           >
             <Plus size={16} /> Add Server
-          </button>
+          </button>}
         </div>
       </div>
+      {isReadOnly && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">Read-only access: you can view edge servers, but you cannot add, edit, or remove them.</div>}
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">
@@ -440,7 +443,7 @@ const EdgeServersPage = () => {
                   >
                     <Eye size={12} /> View
                   </button>
-                  <button
+                  {canWrite && <button
                     onClick={() => {
                       setSelected(server);
                       setForm({
@@ -456,8 +459,8 @@ const EdgeServersPage = () => {
                     className="flex-1 text-xs py-1.5 rounded border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors flex items-center justify-center gap-1"
                   >
                     <Edit2 size={12} /> Edit
-                  </button>
-                  <button
+                  </button>}
+                  {canWrite && <button
                     onClick={() => {
                       setSelected(server);
                       setShowDelete(true);
@@ -465,7 +468,7 @@ const EdgeServersPage = () => {
                     className="flex-1 text-xs py-1.5 rounded border border-red-200 text-red-600 hover:bg-red-50 transition-colors flex items-center justify-center gap-1"
                   >
                     <Trash2 size={12} /> Remove
-                  </button>
+                  </button>}
                 </div>
               </div>
             );

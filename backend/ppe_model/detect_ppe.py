@@ -7,12 +7,16 @@ This script does not simulate or color-guess detections.
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from PIL import Image
 from ultralytics import YOLO
+
+try:
+    from ppe_model.model_assets import load_model_class_names, normalize_label, resolve_model_source
+except ImportError:
+    from model_assets import load_model_class_names, normalize_label, resolve_model_source
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = SCRIPT_DIR.parent
@@ -20,18 +24,17 @@ DATASET_DIR = BACKEND_DIR / "dataset"
 DETECTIONS_DIR = BACKEND_DIR / "detections"
 DETECTIONS_DIR.mkdir(parents=True, exist_ok=True)
 
-DEFAULT_MODEL_URL = "https://huggingface.co/Hexmon/vyra-yolo-ppe-detection/resolve/main/best.pt?download=true"
-LOCAL_MODEL_PATH = BACKEND_DIR.parent / "weights" / "best.pt"
-PPE_MODEL_SOURCE = os.getenv("PPE_MODEL_SOURCE", str(LOCAL_MODEL_PATH if LOCAL_MODEL_PATH.exists() else DEFAULT_MODEL_URL))
+PPE_MODEL_SOURCE = resolve_model_source()
+MODEL_CLASS_NAMES = load_model_class_names()
 
 CLASS_GROUPS = {
     "person": {"person"},
     "helmet_yes": {"hardhat", "helmet"},
     "helmet_no": {"no-hardhat", "no_helmet", "no helmet", "head"},
-    "vest_yes": {"safety vest", "vest", "reflective-jacket", "reflective jacket"},
+    "vest_yes": {"safety vest", "safety-vest", "vest", "reflective-jacket", "reflective jacket"},
     "vest_no": {"no-safety vest", "no vest", "no_safety_vest"},
     "gloves_yes": {"gloves"},
-    "goggles_yes": {"goggles"},
+    "goggles_yes": {"goggles", "glasses"},
 }
 
 
@@ -39,11 +42,6 @@ def clear_detection_outputs() -> None:
     for image_path in DETECTIONS_DIR.glob("*"):
         if image_path.is_file():
             image_path.unlink()
-
-
-def normalize_label(label: str) -> str:
-    return label.strip().lower().replace("_", "-")
-
 
 def load_detector() -> YOLO:
     print(f"  Loading PPE detector: {PPE_MODEL_SOURCE}")
@@ -85,10 +83,10 @@ def detect_all() -> list[dict]:
         for box in inference.boxes:
             class_id = int(box.cls[0])
             confidence = float(box.conf[0])
-            label = str(inference.names.get(class_id, class_id))
+            label = str(MODEL_CLASS_NAMES.get(class_id) or inference.names.get(class_id, class_id))
             x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
             detections.append({
-                "label": label,
+                "label": normalize_label(label),
                 "confidence": confidence,
                 "bbox": (x1, y1, x2, y2),
             })
@@ -125,6 +123,16 @@ def detect_all() -> list[dict]:
         if not has_vest:
             violation_types.append("No Safety Vest")
 
+        missing_items = []
+        if not has_helmet:
+            missing_items.append("helmet")
+        if not has_vest:
+            missing_items.append("vest")
+        if not has_gloves:
+            missing_items.append("gloves")
+        if not has_goggles:
+            missing_items.append("goggles")
+
         confidence = max(item["confidence"] for item in detections) * 100.0
         event_time = base_time + timedelta(minutes=index * 6)
 
@@ -145,8 +153,10 @@ def detect_all() -> list[dict]:
             },
             "has_violation": has_violation,
             "violation_types": violation_types,
+            "missing_items": missing_items,
             "event_time": event_time.isoformat(),
             "bbox": bbox,
+            "model_source": PPE_MODEL_SOURCE,
             "raw_detections": detections,
         })
 

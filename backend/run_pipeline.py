@@ -1,6 +1,6 @@
 """
 run_pipeline.py
-One-shot orchestrator:
+PPE-only backend orchestrator:
   Step 1 -> Download real PPE dataset images
   Step 2 -> Run PPE detection and save annotated images
   Step 3 -> Seed Supabase DB with events and violations
@@ -25,39 +25,6 @@ def step1_download():
     return download()
 
 
-def step0_download_labeled_dataset(dataset_url: str):
-    print("\n" + "-" * 60)
-    print(" STEP 0 - Downloading labeled PPE training dataset")
-    print("-" * 60)
-    from ppe_model.download_labeled_dataset import main as download_labeled_dataset
-
-    return download_labeled_dataset(dataset_url)
-
-
-def step0_train_model(data_yaml: str, model_path: str, epochs: int, imgsz: int, metrics_out: str):
-    print("\n" + "-" * 60)
-    print(" STEP 0B - Training and validating PPE model")
-    print("-" * 60)
-    from ppe_model.train_ppe_model import main as _unused
-    import subprocess
-
-    command = [
-        sys.executable,
-        str(BACKEND_DIR / "ppe_model" / "train_ppe_model.py"),
-        "--data",
-        data_yaml,
-        "--model",
-        model_path,
-        "--epochs",
-        str(epochs),
-        "--imgsz",
-        str(imgsz),
-        "--metrics-out",
-        metrics_out,
-    ]
-    subprocess.run(command, check=True)
-
-
 def step2_detect():
     print("\n" + "-" * 60)
     print(" STEP 2/3 - Running PPE detection")
@@ -76,17 +43,6 @@ def step3_seed(results):
     return seed(results)
 
 
-def step3_quality_gate(metrics_path: str, metric_name: str, min_metric: float):
-    print("\n" + "-" * 60)
-    print(" QUALITY GATE - validating model metrics before DB seed")
-    print("-" * 60)
-    from ppe_model.quality_gate import assert_metric_threshold
-
-    actual = assert_metric_threshold(metrics_path, metric_name, min_metric)
-    print(f"  Passed quality gate: {metric_name}={actual:.4f} >= {min_metric:.4f}")
-    return actual
-
-
 def step4_api():
     print("\n" + "-" * 60)
     print(" Starting Flask API Server (http://localhost:5000)")
@@ -97,24 +53,16 @@ def step4_api():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Real PPE detection pipeline")
+    parser = argparse.ArgumentParser(description="PPE-only backend pipeline")
     parser.add_argument("--skip-download", action="store_true", help="Skip image download and use existing dataset/")
     parser.add_argument("--skip-detect", action="store_true", help="Skip detection and use existing detection_results.json")
     parser.add_argument("--skip-seed", action="store_true", help="Skip database seeding")
     parser.add_argument("--api-only", action="store_true", help="Only start the Flask API server")
     parser.add_argument("--no-api", action="store_true", help="Run pipeline but do not start the API server")
-    parser.add_argument("--metrics-path", default=str(BACKEND_DIR / "model_metrics.json"), help="Validation metrics JSON path")
-    parser.add_argument("--metric-name", default="map50", help="Metric key to enforce before DB seeding")
-    parser.add_argument("--min-metric", type=float, default=0.96, help="Minimum metric threshold required before DB seeding")
-    parser.add_argument("--dataset-url", default="https://huggingface.co/datasets/51ddhesh/PPE_Detection/resolve/main/PPE.zip?download=true", help="Labeled training dataset archive URL")
-    parser.add_argument("--train-model", action="store_true", help="Train and validate the PPE model before inference")
-    parser.add_argument("--train-epochs", type=int, default=50, help="Training epochs for PPE model")
-    parser.add_argument("--train-imgsz", type=int, default=960, help="Training image size for PPE model")
-    parser.add_argument("--base-model", default=str(BACKEND_DIR.parent / "yolov8n.pt"), help="Base YOLO model path for training")
     args = parser.parse_args()
 
     print("\n" + "=" * 60)
-    print("  REAL PPE DETECTION PIPELINE")
+    print("  PPE-ONLY BACKEND PIPELINE")
     print("=" * 60)
 
     if args.api_only:
@@ -122,10 +70,6 @@ def main():
         return
 
     results = None
-
-    if args.train_model:
-        data_yaml = step0_download_labeled_dataset(args.dataset_url)
-        step0_train_model(str(data_yaml), args.base_model, args.train_epochs, args.train_imgsz, args.metrics_path)
 
     if not args.skip_download:
         step1_download()
@@ -147,7 +91,6 @@ def main():
         print(f"Loaded {len(results)} results from {manifest}")
 
     if not args.skip_seed:
-        step3_quality_gate(args.metrics_path, args.metric_name, args.min_metric)
         step3_seed(results)
     else:
         print("\nSkipping DB seeding (--skip-seed)")

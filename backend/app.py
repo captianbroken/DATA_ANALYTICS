@@ -13,7 +13,11 @@ import os
 from pathlib import Path
 from flask import Flask, jsonify, send_from_directory, abort, request
 from flask_cors import CORS
-from db import get_connection
+
+try:
+    from .db import get_connection
+except ImportError:
+    from db import get_connection
 
 BACKEND_DIR   = Path(__file__).resolve().parent
 DETECTIONS_DIR = BACKEND_DIR / "detections"

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, Lock, Mail, Eye, EyeOff } from 'lucide-react';
+import { AlertCircle, Lock, Mail, Eye, EyeOff, Shield, Camera, Cpu, AlertTriangle } from 'lucide-react';
 import { HypersparkWordmark } from '../components/brand/HypersparkBrand';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 
@@ -12,6 +12,28 @@ const Login = () => {
   const [debugInfo, setDebugInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const features = [
+    {
+      icon: Camera,
+      title: 'Unified surveillance',
+      copy: 'Monitor camera infrastructure, site activity, and operational coverage from one secure workspace.',
+    },
+    {
+      icon: Shield,
+      title: 'Role-based access',
+      copy: 'Provide controlled access for administrators, operators, and site-level users with governed permissions.',
+    },
+    {
+      icon: AlertTriangle,
+      title: 'Incident awareness',
+      copy: 'Track alerts, safety violations, and operational exceptions with immediate visibility and traceability.',
+    },
+    {
+      icon: Cpu,
+      title: 'Edge-ready operations',
+      copy: 'Support distributed monitoring environments with resilient infrastructure and low-latency processing.',
+    },
+  ];
 
   const toFriendlyError = (err: any) => {
     const message = err?.message || '';
@@ -129,97 +151,142 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-[#001f4d] to-slate-900 p-4">
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {Array.from({ length: 20 }).map((_, index) => (
-          <div
-            key={index}
-            className="absolute rounded-full bg-white/5"
-            style={{
-              width: `${20 + index * 10}px`,
-              height: `${20 + index * 10}px`,
-              top: `${(index * 17) % 100}%`,
-              left: `${(index * 23) % 100}%`,
-              animationDelay: `${index * 0.3}s`,
-            }}
-          />
-        ))}
-      </div>
-
-      <div className="relative max-w-md w-full">
-        <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-2xl p-8 border border-white/20">
-          <div className="flex flex-col items-center mb-10">
-            <div className="bg-white rounded-xl px-6 py-4 shadow-sm mb-4 border border-slate-100">
-              <HypersparkWordmark className="h-10 w-auto" />
+    <div className="login-shell relative overflow-hidden">
+      <div className="relative z-10 min-h-screen flex">
+        <section className="hidden lg:flex lg:w-[56%] xl:w-[60%] px-10 xl:px-16 py-10 items-center">
+          <div className="max-w-2xl">
+            <div className="flex items-center gap-5 mb-10">
+              <HypersparkWordmark
+                className="h-14 w-auto max-w-[260px] object-contain"
+                style={{ filter: 'brightness(1.55) contrast(1.22) saturate(1.1) drop-shadow(0 10px 24px rgba(0, 173, 239, 0.2))' }}
+              />
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.35em] text-sky-300 font-bold">AI MONITORING PLATFORM</p>
+                <p className="text-sm text-slate-400 mt-1">Enterprise safety and monitoring operations</p>
+              </div>
             </div>
-            <div className="text-center">
-              <p className="text-[10px] text-slate-500 uppercase tracking-[0.25em] font-bold mb-1">AI MONITORING DASHBOARD</p>
-              <p className="text-slate-400 text-xs">Sign in to continue</p>
+
+            <div className="mb-10">
+              <p className="text-sky-300 text-sm font-semibold uppercase tracking-[0.24em] mb-4">Operational Control</p>
+              <h1 className="text-5xl leading-tight font-bold text-white max-w-xl">
+                Intelligent monitoring
+                <span className="block text-[#8addff]">for modern operations.</span>
+              </h1>
+              <p className="mt-5 text-lg text-slate-300 max-w-xl leading-8">
+                Access the Hyperspark control center for site visibility, camera oversight, alert management, and security operations across your organization.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {features.map(feature => {
+                const Icon = feature.icon;
+                return (
+                  <div key={feature.title} className="auth-feature-card rounded-[1.4rem] p-5">
+                    <div className="mb-4 h-11 w-11 rounded-2xl brand-gradient flex items-center justify-center shadow-brand">
+                      <Icon size={20} className="text-white" />
+                    </div>
+                    <h2 className="text-white text-lg font-semibold">{feature.title}</h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">{feature.copy}</p>
+                  </div>
+                );
+              })}
             </div>
           </div>
+        </section>
 
-          {error && (
-            <div className="mb-5 p-4 bg-red-50 border border-red-200 text-red-600 rounded-xl text-sm space-y-2">
-              <div className="flex items-start gap-2">
-                <AlertCircle size={17} className="flex-shrink-0 mt-0.5" />
-                <span>{error}</span>
+        <section className="flex-1 flex items-center justify-center px-4 py-8 sm:px-6">
+          <div className="w-full max-w-md relative z-10">
+            <div className="lg:hidden flex flex-col items-center text-center mb-7">
+              <HypersparkWordmark
+                className="h-12 w-auto max-w-[240px] object-contain mb-4"
+                style={{ filter: 'brightness(1.55) contrast(1.22) saturate(1.1) drop-shadow(0 10px 24px rgba(0, 173, 239, 0.2))' }}
+              />
+              <p className="text-[11px] uppercase tracking-[0.32em] text-sky-300 font-bold mb-1">AI MONITORING DASHBOARD</p>
+              <p className="text-slate-400 text-sm">Secure access to the Hyperspark control center</p>
+            </div>
+
+            <div className="login-panel rounded-[1.75rem] p-7 sm:p-8">
+              <div className="mb-8">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="h-11 w-11 rounded-2xl brand-gradient flex items-center justify-center shadow-brand">
+                    <Shield size={20} className="text-white" />
+                  </div>
+                  <div>
+                    <p className="text-white text-2xl font-semibold">Welcome back</p>
+                    <p className="text-slate-400 text-sm">Sign in to continue to your dashboard</p>
+                  </div>
+                </div>
               </div>
-              {debugInfo && (
-                <pre className="whitespace-pre-wrap text-[11px] leading-4 text-red-500/80 bg-white/60 border border-red-100 rounded-lg p-2">{debugInfo}</pre>
+
+              {error && (
+                <div className="mb-5 p-4 bg-red-500/10 border border-red-400/20 text-red-200 rounded-2xl text-sm space-y-2">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle size={17} className="flex-shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                  {debugInfo && (
+                    <pre className="whitespace-pre-wrap text-[11px] leading-4 text-red-100/75 bg-black/10 border border-red-400/10 rounded-xl p-2">{debugInfo}</pre>
+                  )}
+                </div>
               )}
-            </div>
-          )}
 
-          <form onSubmit={handleLogin} className="space-y-5">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Email</label>
-              <div className="relative">
-                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={event => setEmail(event.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all text-sm"
-                  placeholder="admin@company.com"
-                />
-              </div>
-            </div>
+              <form onSubmit={handleLogin} className="space-y-5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-[0.24em] mb-2">Email</label>
+                  <div className="relative">
+                    <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={event => setEmail(event.target.value)}
+                      className="login-input w-full pl-10 pr-4 py-3 rounded-2xl transition-all text-sm"
+                      placeholder="admin@company.com"
+                    />
+                  </div>
+                </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">Password</label>
-              <div className="relative">
-                <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type={showPwd ? 'text' : 'password'}
-                  required
-                  value={password}
-                  onChange={event => setPassword(event.target.value)}
-                  className="w-full pl-10 pr-10 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all text-sm"
-                  placeholder="Enter your password"
-                />
-                <button type="button" onClick={() => setShowPwd(value => !value)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                  {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-[0.24em] mb-2">Password</label>
+                  <div className="relative">
+                    <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type={showPwd ? 'text' : 'password'}
+                      required
+                      value={password}
+                      onChange={event => setPassword(event.target.value)}
+                      className="login-input w-full pl-10 pr-10 py-3 rounded-2xl transition-all text-sm"
+                      placeholder="Enter your password"
+                    />
+                    <button type="button" onClick={() => setShowPwd(value => !value)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200">
+                      {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full text-white font-semibold py-3.5 rounded-2xl transition-all shadow-brand hover:opacity-90 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm brand-gradient"
+                >
+                  {loading ? (
+                    <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Signing In...</>
+                  ) : 'Sign In to Dashboard'}
                 </button>
+              </form>
+
+              <div className="mt-6 rounded-2xl bg-white/5 border border-white/8 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.24em] text-sky-300 font-semibold mb-1">Secure Access</p>
+                <p className="text-xs text-slate-400">
+                  Access to this platform is controlled, monitored, and intended for authorized personnel only.
+                </p>
               </div>
+              <p className="mt-6 text-center text-xs text-slate-500">
+                Secured by Hyperspark AI Security - all access is logged
+              </p>
             </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              style={{ backgroundColor: loading ? '#94a3b8' : '#005baa' }}
-              className="w-full text-white font-semibold py-3 rounded-xl transition-all shadow-sm hover:opacity-90 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm"
-            >
-              {loading ? (
-                <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Signing In...</>
-              ) : 'Sign In to Dashboard'}
-            </button>
-          </form>
-
-          <p className="mt-6 text-center text-xs text-slate-400">
-            Secured by Hyperspark AI Security - All access is logged
-          </p>
-        </div>
+          </div>
+        </section>
       </div>
     </div>
   );

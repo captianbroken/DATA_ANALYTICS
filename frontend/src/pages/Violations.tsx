@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Search, Download, AlertTriangle, CheckCircle, RefreshCw, Camera } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { usePermissions } from '../hooks/usePermissions';
 import { selectUsersWithOptionalSite } from '../lib/userQueries';
 import { resolveSnapshotUrl } from '../lib/snapshotUrl';
 import { Modal } from '../components/ui/Modal';
@@ -72,6 +73,7 @@ const severityColor = (severity: string) => {
 const ViolationsPage = () => {
   const { appUser } = useAuth();
   const isAdmin = appUser?.role === 'admin';
+  const { canWrite, isReadOnly } = usePermissions();
   const assignedSiteId = appUser?.site_id ?? null;
   const [violations, setViolations] = useState<ViolationRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -257,6 +259,7 @@ const ViolationsPage = () => {
           </button>
         </div>
       </div>
+      {isReadOnly && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">Read-only access: you can view violations, but you cannot change their status.</div>}
 
       <div className="grid grid-cols-3 gap-4">
         <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm text-center">
@@ -405,7 +408,7 @@ const ViolationsPage = () => {
                       )}
                     </td>
                     <td className="px-5 py-4 text-right">
-                      {!resolved && (
+                      {!resolved && canWrite && (
                         <button onClick={() => markResolved(violation.id)} disabled={resolvingId === violation.id} className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-1 rounded hover:bg-green-100 transition-colors font-medium disabled:opacity-50">
                           {resolvingId === violation.id ? 'Saving...' : 'Mark Resolved'}
                         </button>

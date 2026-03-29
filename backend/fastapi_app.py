@@ -14,11 +14,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from psycopg2.extras import RealDictCursor
 
-from db import get_connection
+try:
+    from .db import get_connection
+except ImportError:
+    from db import get_connection
 
 load_dotenv()
 
-INGEST_API_KEY = (os.getenv("INGEST_API_KEY") or "").strip()
+INGEST_API_KEY = (os.getenv("INGEST_API_KEY") or os.getenv("PPE_INGEST_API_KEY") or "").strip()
 LOG_LEVEL = (os.getenv("LOG_LEVEL") or "INFO").upper()
 
 logging.basicConfig(
@@ -35,6 +38,16 @@ PPE_NAME_MAP = {
     "gloves": "Gloves",
     "goggles": "Goggles",
 }
+PPE_ITEM_ALIASES = {
+    "hardhat": "helmet",
+    "helmet": "helmet",
+    "vest": "vest",
+    "safety-vest": "vest",
+    "safety vest": "vest",
+    "gloves": "gloves",
+    "glasses": "goggles",
+    "goggles": "goggles",
+}
 
 
 class EventMetadataPayload(BaseModel):
@@ -49,7 +62,7 @@ class EventMetadataPayload(BaseModel):
         for item in value:
             item_norm = str(item).strip().lower()
             if item_norm:
-                normalized.append(item_norm)
+                normalized.append(PPE_ITEM_ALIASES.get(item_norm, item_norm))
         return list(dict.fromkeys(normalized))
 
 
@@ -80,7 +93,9 @@ class PPEEventPayload(BaseModel):
     @classmethod
     def normalize_event_type(cls, value: str) -> str:
         normalized = value.strip()
-        return normalized or "PPE Detection"
+        if not normalized:
+            return "PPE Detection"
+        return "PPE Detection"
 
 
 @contextmanager
@@ -138,6 +153,11 @@ def fetch_ppe_type_map(cur: RealDictCursor) -> dict[str, int]:
 
 
 def create_event(cur: RealDictCursor, payload: PPEEventPayload, image_path: str | None, camera: dict[str, Any]) -> int:
+    missing_items = payload.event_metadata.missing_items
+    description = payload.description
+    if not description and missing_items:
+        description = "Missing " + ", ".join(sorted(item.title() for item in missing_items))
+
     cur.execute(
         """
         INSERT INTO events (
@@ -170,7 +190,7 @@ def create_event(cur: RealDictCursor, payload: PPEEventPayload, image_path: str 
             False,
             payload.confidence,
             image_path,
-            payload.description,
+            description,
             json.dumps(payload.model_dump(mode="json")),
             json.dumps({}),
             payload.timestamp,
@@ -330,4 +350,3 @@ def ingest_ppe_event(payload: PPEEventPayload, _: str = Depends(verify_api_key))
             "ingested_at": datetime.now(timezone.utc).isoformat(),
         },
     }
-

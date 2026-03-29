@@ -8,6 +8,7 @@ export interface AppUser {
   name: string;
   role: 'admin' | 'user';
   site_id: number | null;
+  access_level: 'full_access' | 'read_only';
   status: string;
 }
 
@@ -57,8 +58,8 @@ export const useAuth = () => {
       }
 
       const { data: userRecord } = await selectUsersWithOptionalSite<any>(
-        'id, name, email, status, is_deleted, site_id, roles(role_name)',
-        'id, name, email, status, is_deleted, roles(role_name)',
+        'id, name, email, status, is_deleted, site_id, access_level, roles(role_name)',
+        'id, name, email, status, is_deleted, access_level, roles(role_name)',
         query => query.eq('email', email).eq('is_deleted', false).single(),
       );
 
@@ -76,6 +77,7 @@ export const useAuth = () => {
         name: userRecord.name,
         role: roleName as 'admin' | 'user',
         site_id: userRecord.site_id ?? null,
+        access_level: (userRecord.access_level ?? 'full_access') as 'full_access' | 'read_only',
         status: userRecord.status,
       } satisfies AppUser;
     };
