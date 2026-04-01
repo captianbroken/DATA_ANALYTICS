@@ -132,7 +132,7 @@ npm run rtsp-test-server  # Start RTSP test service
 
 Data tables you will interact with:
 
-- `events` (FRS/PPE detections)
+- `events` (PPE detections)
 - `violations` (PPE violations / intrusion)
 - `cameras`, `edge_servers`, `sites`, `employees`
 
@@ -151,7 +151,6 @@ The UI reads directly from Supabase tables, so any inserts/updates will reflect 
 - Must be logged in with a valid Supabase auth session, not fallback auth.
 
 ---
-
 
 
 

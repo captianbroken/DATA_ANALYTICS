@@ -48,6 +48,14 @@ def load_detector() -> YOLO:
     return YOLO(PPE_MODEL_SOURCE)
 
 
+def resolve_detection_label(inference, class_id: int) -> str:
+    model_names = getattr(inference, "names", {}) or {}
+    label = model_names.get(class_id)
+    if label is None:
+        label = MODEL_CLASS_NAMES.get(class_id, class_id)
+    return normalize_label(str(label))
+
+
 def label_in_group(label: str, group_name: str) -> bool:
     return normalize_label(label) in CLASS_GROUPS[group_name]
 
@@ -83,10 +91,10 @@ def detect_all() -> list[dict]:
         for box in inference.boxes:
             class_id = int(box.cls[0])
             confidence = float(box.conf[0])
-            label = str(MODEL_CLASS_NAMES.get(class_id) or inference.names.get(class_id, class_id))
+            label = resolve_detection_label(inference, class_id)
             x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
             detections.append({
-                "label": normalize_label(label),
+                "label": label,
                 "confidence": confidence,
                 "bbox": (x1, y1, x2, y2),
             })

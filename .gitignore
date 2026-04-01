@@ -106,6 +106,7 @@ backend/training_data/
 backend/dataset/
 backend/runs/
 backend/detections/
+backend/video_tests/
 backend/model_metrics.json
 backend/detection_results.json
 
@@ -119,3 +120,4 @@ weights/
 *.engine
 *.bin
 *.zip
+best (17).pt.zip

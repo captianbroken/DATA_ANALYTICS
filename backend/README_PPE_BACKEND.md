@@ -9,7 +9,7 @@ This backend is aligned to the camera-side script [`PPE .py`](C:/Users/91832/Des
 - `backend/app.py`
   Serves frontend-facing PPE event, violation, stats, and detection-image APIs on port `5000`.
 - `backend/ppe_model/detect_ppe.py`
-  Batch detector for local dataset images using the `sh17` PPE model assets.
+  Batch detector for local dataset images using the latest PPE model asset.
 - `backend/ppe_model/seed_db.py`
   Seeds detected PPE events and violations into PostgreSQL.
 
@@ -33,6 +33,7 @@ Accepted aliases:
 
 Supported PPE model inputs:
 
+- `best (17).pt.zip`
 - `sh17_best.pt`
 - `sh17_best.pt.zip`
 - `weights/sh17_best.pt`
@@ -83,3 +84,4 @@ So for end-to-end local use:
 1. Keep the FastAPI ingestion server on port `8000`
 2. Keep `INGEST_API_KEY` and `PPE_INGEST_API_KEY` identical
 3. Ensure camera id `4` exists in the `cameras` table, or update `DEFAULT_CAMERAS` / `cameras.json`
+4. Set `PPE_MODEL_SOURCE=C:\Users\91832\Desktop\Praveen\best (17).pt.zip` in the root `.env` to force the newest PPE weights

@@ -46,7 +46,6 @@ def get_events():
                         e.id,
                         e.event_time,
                         e.event_type,
-                        e.face_detected,
                         e.confidence_score,
                         e.image_path,
                         e.bbox,

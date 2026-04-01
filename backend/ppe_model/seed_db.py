@@ -162,15 +162,14 @@ def seed(detection_results: list | None = None):
 
                     cur.execute(
                         """
-                        INSERT INTO events (site_id, camera_id, event_type, face_detected, confidence_score, image_path, bbox, event_time)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO events (site_id, camera_id, event_type, confidence_score, image_path, bbox, event_time)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
                         RETURNING id
                         """,
                         (
                             site_id,
                             camera_id,
                             "PPE Detection",
-                            False,
                             confidence,
                             image_path,
                             json.dumps(bbox),

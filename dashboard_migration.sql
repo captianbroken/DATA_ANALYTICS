@@ -93,10 +93,10 @@ BEGIN
 END $$;
 
 ALTER TABLE public.cameras
-    ADD COLUMN IF NOT EXISTS ai_model VARCHAR(50) DEFAULT 'FRS+PPE';
+    ADD COLUMN IF NOT EXISTS ai_model VARCHAR(50) DEFAULT 'PPE';
 
 UPDATE public.cameras
-SET ai_model = COALESCE(ai_model, 'FRS+PPE');
+SET ai_model = COALESCE(NULLIF(TRIM(ai_model), ''), 'PPE');
 
 CREATE OR REPLACE FUNCTION public.create_dashboard_user(
     p_name TEXT,
@@ -963,8 +963,6 @@ RETURNS TABLE (
     edge_servers_offline BIGINT,
     employees BIGINT,
     total_events BIGINT,
-    frs_detections BIGINT,
-    unknown_faces BIGINT,
     ppe_detections BIGINT,
     ppe_violations BIGINT
 )
@@ -999,24 +997,8 @@ AS $$
             FROM public.events ev, bounds b
             WHERE ev.event_time >= b.start_at
               AND ev.event_time <= b.end_at
-              AND UPPER(COALESCE(ev.event_type, '')) ~ '(FRS|FACE)'
               AND (p_site_id IS NULL OR ev.site_id = p_site_id)
-        ) AS frs_detections,
-        (
-            SELECT COUNT(*)
-            FROM public.events ev, bounds b
-            WHERE ev.event_time >= b.start_at
-              AND ev.event_time <= b.end_at
-              AND ev.employee_id IS NULL
-              AND (p_site_id IS NULL OR ev.site_id = p_site_id)
-        ) AS unknown_faces,
-        (
-            SELECT COUNT(*)
-            FROM public.events ev, bounds b
-            WHERE ev.event_time >= b.start_at
-              AND ev.event_time <= b.end_at
               AND UPPER(COALESCE(ev.event_type, '')) ~ '(PPE|HELMET|VEST|GLOVE|GOGGLES)'
-              AND (p_site_id IS NULL OR ev.site_id = p_site_id)
         ) AS ppe_detections,
         (
             SELECT COUNT(*)

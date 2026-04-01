@@ -168,7 +168,6 @@ def create_event(cur: RealDictCursor, payload: PPEEventPayload, image_path: str 
             customer_id,
             external_edge_server_id,
             event_type,
-            face_detected,
             confidence_score,
             image_path,
             description,
@@ -176,7 +175,7 @@ def create_event(cur: RealDictCursor, payload: PPEEventPayload, image_path: str 
             bbox,
             event_time
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
         (
@@ -187,7 +186,6 @@ def create_event(cur: RealDictCursor, payload: PPEEventPayload, image_path: str 
             payload.customer_id,
             payload.edge_server_id,
             payload.event_type,
-            False,
             payload.confidence,
             image_path,
             description,
