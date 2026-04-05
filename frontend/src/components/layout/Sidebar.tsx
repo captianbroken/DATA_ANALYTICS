@@ -6,13 +6,21 @@ import {
 import { useState } from 'react';
 import { HypersparkWordmark } from '../brand/HypersparkBrand';
 import { supabase } from '../../lib/supabase';
+import { getRoleLabel, isClientAdminRole, isSuperAdminRole, type AppRole } from '../../lib/roles';
 
 interface SidebarProps {
-  role: 'admin' | 'user';
+  role: AppRole;
   userName?: string;
 }
 
-const getRoleLabel = (role: 'admin' | 'user') => (role === 'admin' ? 'Admin' : 'Account');
+const superAdminMenu = [
+  { name: 'Dashboard', icon: LayoutDashboard, path: '/' },
+  { name: 'Sites', icon: MapPin, path: '/sites' },
+  { name: 'Cameras', icon: Video, path: '/cameras' },
+  { name: 'Edge Servers', icon: Server, path: '/edge-servers' },
+  { name: 'Clients', icon: UserCog, path: '/users' },
+  { name: 'Settings', icon: Settings, path: '/settings' },
+];
 
 const adminMenu = [
   { name: 'Dashboard', icon: LayoutDashboard, path: '/' },
@@ -22,7 +30,7 @@ const adminMenu = [
   { name: 'Employees', icon: Users, path: '/employees' },
   { name: 'Events', icon: AlertTriangle, path: '/events' },
   { name: 'Violations', icon: ShieldAlert, path: '/violations' },
-  { name: 'Users', icon: UserCog, path: '/users' },
+  { name: 'Clients', icon: UserCog, path: '/users' },
   { name: 'Settings', icon: Settings, path: '/settings' },
 ];
 
@@ -39,7 +47,7 @@ const userMenu = [
 const Sidebar = ({ role, userName }: SidebarProps) => {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
-  const menuItems = role === 'admin' ? adminMenu : userMenu;
+  const menuItems = isSuperAdminRole(role) ? superAdminMenu : isClientAdminRole(role) ? adminMenu : userMenu;
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -78,7 +86,7 @@ const Sidebar = ({ role, userName }: SidebarProps) => {
       <nav className="flex-1 overflow-y-auto scrollbar-thin py-5 px-3 space-y-1">
         {!collapsed && (
           <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-[0.28em] px-3 pb-2">
-            {role === 'admin' ? 'Admin Panel' : 'Account Panel'}
+            {role === 'super_admin' ? 'Platform Control' : role === 'admin' ? 'Client Workspace' : 'Operations Workspace'}
           </p>
         )}
         {menuItems.map(({ name, icon: Icon, path }) => (

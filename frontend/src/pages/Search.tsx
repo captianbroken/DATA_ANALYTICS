@@ -40,7 +40,7 @@ interface UserResult {
   name: string;
   email: string;
   status: string | null;
-  roles?: { role_name: 'admin' | 'user' } | { role_name: 'admin' | 'user' }[];
+  roles?: { role_name: 'super_admin' | 'admin' | 'user' } | { role_name: 'super_admin' | 'admin' | 'user' }[];
 }
 
 interface EventResult {
@@ -276,7 +276,7 @@ const SearchPage = () => {
     },
     {
       key: 'users',
-      title: 'Users',
+      title: 'Clients',
       icon: Users,
       viewAll: `/users?q=${encodeURIComponent(query)}`,
       items: results.users.map(user => (
@@ -321,7 +321,7 @@ const SearchPage = () => {
       <div>
         <h1 className="text-2xl font-bold text-slate-800">Global Search</h1>
         <p className="text-slate-500 text-sm mt-1">
-          {query ? `Results for "${query}" (${totalResults})` : 'Type in the top search bar to find sites, cameras, users, and events.'}
+          {query ? `Results for "${query}" (${totalResults})` : 'Type in the top search bar to find clients, sites, cameras, and events.'}
         </p>
       </div>
 

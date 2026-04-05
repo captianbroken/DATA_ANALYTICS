@@ -6,6 +6,8 @@ import { Modal, FormField, FormActions } from '../components/ui/Modal';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../hooks/usePermissions';
 import { selectUsersWithOptionalSite } from '../lib/userQueries';
+import { getScopeSiteId, isAdminRole, isSuperAdminRole } from '../lib/roles';
+import { scopeSitesForActor, scopeUsersForActor } from '../lib/tenantScope';
 
 interface Employee {
   id: number;
@@ -32,9 +34,10 @@ const emptyForm = { name: '', employee_code: '', department: '', designation: ''
 
 const EmployeesPage = () => {
   const { appUser } = useAuth();
-  const isAdmin = appUser?.role === 'admin';
+  const isAdmin = isAdminRole(appUser?.role);
+  const isSuperAdmin = isSuperAdminRole(appUser?.role);
   const { canWrite, isReadOnly } = usePermissions();
-  const assignedSiteId = appUser?.site_id ?? null;
+  const assignedSiteId = getScopeSiteId(appUser);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
@@ -63,7 +66,7 @@ const EmployeesPage = () => {
     employee_code: form.employee_code.trim(),
     department: form.department.trim(),
     designation: form.designation.trim(),
-    site_id: isAdmin ? (form.site_id ? Number(form.site_id) : null) : assignedSiteId,
+    site_id: isSuperAdmin ? (form.site_id ? Number(form.site_id) : null) : assignedSiteId,
     created_by: appUser?.id ?? null,
     has_spectacles: form.has_spectacles === 'yes',
   });
@@ -96,7 +99,7 @@ const EmployeesPage = () => {
     setLoading(true);
     setError('');
 
-    if (!isAdmin && !assignedSiteId) {
+    if (!isSuperAdmin && !assignedSiteId) {
       setEmployees([]);
       setSites([]);
       setUsers([]);
@@ -107,7 +110,7 @@ const EmployeesPage = () => {
     let employeeQuery = supabase.from('employees').select('*, sites(site_name)').eq('is_deleted', false).order('name');
     let siteQuery = supabase.from('sites').select('id, site_name').order('site_name');
 
-    if (!isAdmin && assignedSiteId) {
+    if (!isSuperAdmin && assignedSiteId) {
       employeeQuery = employeeQuery.eq('site_id', assignedSiteId);
       siteQuery = siteQuery.eq('id', assignedSiteId);
     }
@@ -123,7 +126,7 @@ const EmployeesPage = () => {
     if (empError) setError(empError.message);
     if (empData) {
       const usersBySite = new Map<number, number>();
-      (usersResult.data as { site_id?: number | null }[] | null)?.forEach(user => {
+      scopeUsersForActor((usersResult.data as UserOption[] | null) ?? [], appUser).forEach(user => {
         if (!user.site_id) return;
         usersBySite.set(user.site_id, (usersBySite.get(user.site_id) ?? 0) + 1);
       });
@@ -133,10 +136,10 @@ const EmployeesPage = () => {
         linked_users: employee.site_id ? (usersBySite.get(employee.site_id) ?? 0) : 0,
       })));
     }
-    if (siteData) setSites(siteData as Site[]);
-    setUsers((usersResult.data as UserOption[] | null) ?? []);
+    if (siteData) setSites(scopeSitesForActor(siteData as Site[], appUser));
+    setUsers(scopeUsersForActor((usersResult.data as UserOption[] | null) ?? [], appUser));
     setLoading(false);
-  }, [assignedSiteId, isAdmin]);
+  }, [appUser, assignedSiteId, isSuperAdmin, isAdmin]);
 
   useEffect(() => {
     fetchAll();
@@ -387,7 +390,7 @@ const EmployeesPage = () => {
         </div>
         {isAdmin && users.length > 0 && (
           <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm">
-            <span className="text-xs text-slate-400 uppercase tracking-wide">User</span>
+            <span className="text-xs text-slate-400 uppercase tracking-wide">Client</span>
             <select value={selectedUserId} onChange={event => {
               const params = new URLSearchParams(searchParams);
               if (event.target.value) params.set('user', event.target.value);
@@ -401,7 +404,7 @@ const EmployeesPage = () => {
         )}
         {isAdmin && users.length === 0 && (
           <span className="text-xs text-amber-600 bg-amber-50 border border-amber-100 px-3 py-2 rounded-lg">
-            Assign a site to a user in Users before filtering by user.
+            Assign a client user to a site in Clients before filtering by client.
           </span>
         )}
         <span className="text-xs text-slate-500 bg-slate-100 px-3 py-2 rounded-lg">{filtered.length} employees</span>
@@ -419,7 +422,7 @@ const EmployeesPage = () => {
                 <th className="px-5 py-3 font-medium">Employee</th>
                 <th className="px-5 py-3 font-medium">ID / Dept</th>
                 <th className="px-5 py-3 font-medium">Site</th>
-                {isAdmin && <th className="px-5 py-3 font-medium text-center">User Access</th>}
+                {isAdmin && <th className="px-5 py-3 font-medium text-center">Client Access</th>}
                 <th className="px-5 py-3 font-medium text-center">FRS Status</th>
                 <th className="px-5 py-3 font-medium text-right">Actions</th>
               </tr>
@@ -481,7 +484,7 @@ const EmployeesPage = () => {
                 ['Employee ID', selected.employee_code ?? '-'],
                 ['Department', selected.department ?? '-'],
                 ['Site', selected.sites?.site_name ?? '-'],
-                ...(isAdmin ? [['Users With Access', String(selected.linked_users ?? 0)] as [string, string]] : []),
+                ...(isAdmin ? [['Clients With Access', String(selected.linked_users ?? 0)] as [string, string]] : []),
                 ['FRS Status', selected.face_registered ? 'Enrolled' : 'Not Enrolled'],
                 ['Spectacles', selected.has_spectacles ? 'Yes' : 'No'],
                 ['Photos', Array.isArray(selected.face_image_paths) ? String(selected.face_image_paths.length) : '0'],

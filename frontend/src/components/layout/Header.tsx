@@ -3,6 +3,7 @@ import { Bell, Search, LogOut, UserCircle, AlertTriangle, Activity } from 'lucid
 import { useLocation, useNavigate } from 'react-router-dom';
 import { isSupabaseConfigured, supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
+import { canAccessAdminSearch, canAccessTenantOperations, getRoleLabel, isSuperAdminRole } from '../../lib/roles';
 
 interface HeaderProps {
   userName?: string;
@@ -18,12 +19,6 @@ interface NotificationItem {
   severity: 'info' | 'warning' | 'danger';
   occurredAt: string;
 }
-
-const getRoleLabel = (role?: string) => {
-  if (role === 'admin') return 'Admin';
-  if (role === 'user') return 'Account';
-  return role || 'Account';
-};
 
 const Header = ({ userName, role }: HeaderProps) => {
   const navigate = useNavigate();
@@ -52,13 +47,15 @@ const Header = ({ userName, role }: HeaderProps) => {
     setQuery(nextQuery);
   }, [location.search, query]);
 
-  const isAdmin = role === 'admin';
+  const isSuperAdmin = isSuperAdminRole(role);
+  const canUseGlobalSearch = canAccessAdminSearch(role);
+  const canUseNotifications = canAccessTenantOperations(role);
 
   const applySearch = (value: string) => {
     const trimmed = value.trim();
     const currentUrl = location.search ? `${location.pathname}${location.search}` : location.pathname;
 
-    if (!isAdmin) {
+    if (!canUseGlobalSearch) {
       const params = new URLSearchParams(location.search);
       if (trimmed) {
         params.set('q', trimmed);
@@ -126,7 +123,12 @@ const Header = ({ userName, role }: HeaderProps) => {
     }
 
     const fetchNotifications = async () => {
-      if (role !== 'admin' && !appUser?.site_id) {
+      if (!canUseNotifications) {
+        setNotifications([]);
+        return;
+      }
+
+      if (!isSuperAdmin && !appUser?.site_id) {
         setNotifications([]);
         return;
       }
@@ -138,7 +140,7 @@ const Header = ({ userName, role }: HeaderProps) => {
 
       try {
         const params = {
-          p_site_id: role === 'admin' ? null : appUser?.site_id ?? null,
+          p_site_id: isSuperAdmin ? null : appUser?.site_id ?? null,
           p_start: start.toISOString(),
           p_end: end.toISOString(),
         };
@@ -190,7 +192,7 @@ const Header = ({ userName, role }: HeaderProps) => {
     }, 20000);
 
     return () => window.clearInterval(intervalId);
-  }, [appUser?.site_id, role]);
+  }, [appUser?.site_id, canUseNotifications, isSuperAdmin]);
 
   const unreadCount = useMemo(
     () => notifications.filter(item => item.type === 'violation' || item.severity === 'danger').length,
@@ -244,7 +246,7 @@ const Header = ({ userName, role }: HeaderProps) => {
                   }
                 }}
                 className="w-full pl-9 pr-3 py-2.5 bg-white text-slate-700 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-100 focus:border-sky-400 transition-all"
-                placeholder="Search events, sites, cameras..."
+                placeholder={canUseGlobalSearch ? 'Search team, events, sites, cameras...' : 'Search this page...'}
               />
             </div>
           </div>
@@ -255,75 +257,77 @@ const Header = ({ userName, role }: HeaderProps) => {
               <span className="text-xs font-medium">Synced</span>
             </div>
 
-            <div className="relative" ref={notificationsRef}>
-              <button
-                type="button"
-                onClick={() => setNotificationsOpen(value => !value)}
-                className="relative p-2.5 text-slate-300 hover:text-white hover:bg-white/6 rounded-xl transition-colors"
-                title="Notifications"
-              >
-                <Bell size={18} />
-                {unreadCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-5 h-5 px-1 bg-red-500 text-white text-[10px] font-semibold rounded-full border-2 border-slate-950 flex items-center justify-center">
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </span>
-                )}
-              </button>
+            {canUseNotifications && (
+              <div className="relative" ref={notificationsRef}>
+                <button
+                  type="button"
+                  onClick={() => setNotificationsOpen(value => !value)}
+                  className="relative p-2.5 text-slate-300 hover:text-white hover:bg-white/6 rounded-xl transition-colors"
+                  title="Notifications"
+                >
+                  <Bell size={18} />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 min-w-5 h-5 px-1 bg-red-500 text-white text-[10px] font-semibold rounded-full border-2 border-slate-950 flex items-center justify-center">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                  )}
+                </button>
 
-              {notificationsOpen && (
-                <div className="notification-popover absolute right-0 top-[calc(100%+0.75rem)] w-[22rem] rounded-2xl overflow-hidden z-30">
-                  <div className="px-4 py-3 border-b border-white/8 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-white">Notifications</p>
-                      <p className="text-xs text-slate-400">Recent events and violations</p>
+                {notificationsOpen && (
+                  <div className="notification-popover absolute right-0 top-[calc(100%+0.75rem)] w-[22rem] rounded-2xl overflow-hidden z-30">
+                    <div className="px-4 py-3 border-b border-white/8 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-white">Notifications</p>
+                        <p className="text-xs text-slate-400">Recent events and violations</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNotificationsOpen(false);
+                          navigate(unreadCount > 0 ? '/violations' : '/events');
+                        }}
+                        className="text-xs text-sky-300 hover:text-sky-200"
+                      >
+                        View all
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNotificationsOpen(false);
-                        navigate(unreadCount > 0 ? '/violations' : '/events');
-                      }}
-                      className="text-xs text-sky-300 hover:text-sky-200"
-                    >
-                      View all
-                    </button>
-                  </div>
 
-                  <div className="max-h-[22rem] overflow-y-auto scrollbar-thin">
-                    {notificationsLoading ? (
-                      <div className="px-4 py-8 text-sm text-slate-400 text-center">Loading notifications...</div>
-                    ) : notifications.length === 0 ? (
-                      <div className="px-4 py-8 text-sm text-slate-400 text-center">No recent alerts.</div>
-                    ) : (
-                      notifications.map(item => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => {
-                            setNotificationsOpen(false);
-                            navigate(item.href);
-                          }}
-                          className="w-full text-left px-4 py-3 border-b border-white/6 hover:bg-white/5 transition-colors"
-                        >
-                          <div className="flex items-start gap-3">
-                            <div className={`mt-0.5 h-9 w-9 rounded-xl flex items-center justify-center ${item.type === 'violation' ? 'bg-red-500/12 text-red-300' : 'bg-sky-500/12 text-sky-300'}`}>
-                              {item.type === 'violation' ? <AlertTriangle size={16} /> : <Activity size={16} />}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-start justify-between gap-3">
-                                <p className="text-sm font-medium text-white leading-5">{item.title}</p>
-                                <span className="text-[11px] text-slate-500 whitespace-nowrap">{formatRelative(item.occurredAt)}</span>
+                    <div className="max-h-[22rem] overflow-y-auto scrollbar-thin">
+                      {notificationsLoading ? (
+                        <div className="px-4 py-8 text-sm text-slate-400 text-center">Loading notifications...</div>
+                      ) : notifications.length === 0 ? (
+                        <div className="px-4 py-8 text-sm text-slate-400 text-center">No recent alerts.</div>
+                      ) : (
+                        notifications.map(item => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => {
+                              setNotificationsOpen(false);
+                              navigate(item.href);
+                            }}
+                            className="w-full text-left px-4 py-3 border-b border-white/6 hover:bg-white/5 transition-colors"
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className={`mt-0.5 h-9 w-9 rounded-xl flex items-center justify-center ${item.type === 'violation' ? 'bg-red-500/12 text-red-300' : 'bg-sky-500/12 text-sky-300'}`}>
+                                {item.type === 'violation' ? <AlertTriangle size={16} /> : <Activity size={16} />}
                               </div>
-                              <p className="text-xs text-slate-400 mt-1 leading-5">{item.meta}</p>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-start justify-between gap-3">
+                                  <p className="text-sm font-medium text-white leading-5">{item.title}</p>
+                                  <span className="text-[11px] text-slate-500 whitespace-nowrap">{formatRelative(item.occurredAt)}</span>
+                                </div>
+                                <p className="text-xs text-slate-400 mt-1 leading-5">{item.meta}</p>
+                              </div>
                             </div>
-                          </div>
-                        </button>
-                      ))
-                    )}
+                          </button>
+                        ))
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             <button
               onClick={() => {
@@ -375,7 +379,7 @@ const Header = ({ userName, role }: HeaderProps) => {
                 }
               }}
               className="w-full pl-9 pr-3 py-2.5 bg-white text-slate-700 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-100 focus:border-sky-400 transition-all"
-              placeholder="Search events, sites, cameras..."
+              placeholder={canUseGlobalSearch ? 'Search team, events, sites, cameras...' : 'Search this page...'}
             />
           </div>
         </div>

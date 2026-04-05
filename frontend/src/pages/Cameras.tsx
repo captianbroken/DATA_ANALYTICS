@@ -6,6 +6,9 @@ import { Modal, FormField, FormActions } from '../components/ui/Modal';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../hooks/usePermissions';
 import { selectUsersWithOptionalSite } from '../lib/userQueries';
+import { getScopeSiteId, isAdminRole, isSuperAdminRole } from '../lib/roles';
+import { buildCameraModelOptions, type SiteServiceRecord } from '../lib/siteServices';
+import { scopeSitesForActor, scopeUsersForActor } from '../lib/tenantScope';
 
 interface Camera {
   id: number;
@@ -96,6 +99,7 @@ const CamForm = ({
   rtspTestUrl,
   rtspTestEdgeServerId,
   onTestRtsp,
+  modelOptions,
   onCancel, 
   onSubmit,
 }: { 
@@ -109,6 +113,7 @@ const CamForm = ({
   rtspTestUrl: string;
   rtspTestEdgeServerId: number | null;
   onTestRtsp: (url: string) => void;
+  modelOptions: Array<{ value: string; label: string }>;
   onCancel: () => void; 
   onSubmit: (event: React.FormEvent) => void;
 }) => {
@@ -123,9 +128,12 @@ const CamForm = ({
   const canTest = Boolean(trimmedUrl) && Boolean(selectedEdgeServerId);
   const missingEdgeServer = Boolean(trimmedUrl) && !selectedEdgeServerId;
   const needsTest = Boolean(trimmedUrl) && (!isCurrentUrlTested || rtspTestStatus !== 'online');
+  const noActiveServices = modelOptions.length === 1 && modelOptions[0]?.label === 'No Active Service';
   const submitLabel = missingEdgeServer
     ? 'Select Edge Server'
-    : (needsTest ? 'Test Connection First' : 'Save');
+    : noActiveServices
+      ? 'Activate Service First'
+      : (needsTest ? 'Test Connection First' : 'Save');
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
@@ -161,7 +169,12 @@ const CamForm = ({
         <FormField label="Site" value={String(form.site_id)} onChange={value => setForm((current: any) => ({ ...current, site_id: value }))} options={sites.map(site => ({ value: String(site.id), label: site.site_name }))} />
         <FormField label="Edge Server" value={String(form.edge_server_id)} onChange={value => setForm((current: any) => ({ ...current, edge_server_id: value }))} options={edgeServers.map(server => ({ value: String(server.id), label: server.server_name }))} />
       </div>
-      <FormField label="AI Model" value={form.ai_model} onChange={value => setForm((current: any) => ({ ...current, ai_model: value }))} options={[{ value: 'FRS', label: 'FRS Only' }, { value: 'PPE', label: 'PPE Only' }, { value: 'FRS+PPE', label: 'FRS + PPE' }]} />
+      <FormField label="AI Model" value={form.ai_model} onChange={value => setForm((current: any) => ({ ...current, ai_model: value }))} options={modelOptions} />
+      {noActiveServices && (
+        <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+          This site has no active AI service. Ask the super admin to activate PPE or FRS for this client before saving cameras.
+        </p>
+      )}
       <FormActions
         onCancel={onCancel}
         loading={saving}
@@ -169,7 +182,7 @@ const CamForm = ({
         secondaryDisabled={!canTest}
         secondaryLoading={isTesting}
         submitLabel={submitLabel}
-        disabled={missingEdgeServer || needsTest}
+        disabled={missingEdgeServer || needsTest || noActiveServices}
       />
     </form>
   );
@@ -177,13 +190,15 @@ const CamForm = ({
 
 const CamerasPage = () => {
   const { appUser } = useAuth();
-  const isAdmin = appUser?.role === 'admin';
+  const isAdmin = isAdminRole(appUser?.role);
+  const isSuperAdmin = isSuperAdminRole(appUser?.role);
   const { canWrite, isReadOnly } = usePermissions();
-  const assignedSiteId = appUser?.site_id ?? null;
+  const assignedSiteId = getScopeSiteId(appUser);
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [edgeServers, setEdgeServers] = useState<EdgeServer[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
+  const [siteServices, setSiteServices] = useState<SiteServiceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
@@ -203,6 +218,15 @@ const CamerasPage = () => {
 
   const [testingId, setTestingId] = useState<number | null>(null);
   const [checkingIds, setCheckingIds] = useState<Set<number>>(new Set());
+  const selectedFormSiteId = form.site_id ? Number(form.site_id) : assignedSiteId;
+  const currentSiteServices = useMemo(
+    () => siteServices.filter(service => service.site_id === selectedFormSiteId),
+    [selectedFormSiteId, siteServices],
+  );
+  const modelOptions = useMemo(
+    () => buildCameraModelOptions(currentSiteServices),
+    [currentSiteServices],
+  );
 
   const buildEdgeServerBaseUrl = (edgeServerId: number | null) => {
     if (!edgeServerId) return null;
@@ -258,7 +282,7 @@ const CamerasPage = () => {
     setLoading(true);
     setError('');
 
-    if (!isAdmin && !assignedSiteId) {
+    if (!isSuperAdmin && !assignedSiteId) {
       setCameras([]);
       setSites([]);
       setEdgeServers([]);
@@ -271,28 +295,30 @@ const CamerasPage = () => {
     let siteQuery = supabase.from('sites').select('id, site_name').order('site_name');
     let serverQuery = supabase.from('edge_servers').select('id, server_name, ip_address, site_id').eq('is_deleted', false).order('server_name');
 
-    if (!isAdmin && assignedSiteId) {
+    if (!isSuperAdmin && assignedSiteId) {
       cameraQuery = cameraQuery.eq('site_id', assignedSiteId);
       siteQuery = siteQuery.eq('id', assignedSiteId);
       serverQuery = serverQuery.eq('site_id', assignedSiteId);
     }
 
-    const [{ data: cameraData, error: cameraError }, { data: siteData }, { data: serverData }, usersResult] = await Promise.all([
+    const [{ data: cameraData, error: cameraError }, { data: siteData }, { data: serverData }, usersResult, { data: serviceData }] = await Promise.all([
       cameraQuery,
       siteQuery,
       serverQuery,
       isAdmin
         ? selectUsersWithOptionalSite<UserOption>('id, name, site_id', 'id, name', query => query.eq('is_deleted', false).not('site_id', 'is', null).order('name'))
         : Promise.resolve({ data: [], error: null, siteAssignmentAvailable: true }),
+      supabase.rpc('list_site_services'),
     ]);
 
     if (cameraError) setError(cameraError.message);
     if (cameraData) setCameras(cameraData as Camera[]);
-    if (siteData) setSites(siteData as Site[]);
+    if (siteData) setSites(scopeSitesForActor(siteData as Site[], appUser));
     if (serverData) setEdgeServers(serverData as EdgeServer[]);
-    setUsers((usersResult.data as UserOption[] | null) ?? []);
+    if (serviceData) setSiteServices((serviceData as SiteServiceRecord[]) ?? []);
+    setUsers(scopeUsersForActor((usersResult.data as UserOption[] | null) ?? [], appUser));
     setLoading(false);
-  }, [assignedSiteId, isAdmin]);
+  }, [appUser, assignedSiteId, isSuperAdmin, isAdmin]);
 
   useEffect(() => {
     fetchAll();
@@ -303,6 +329,12 @@ const CamerasPage = () => {
       setSearch(queryParam);
     }
   }, [queryParam]);
+
+  useEffect(() => {
+    if (!modelOptions.some(option => option.value === form.ai_model)) {
+      setForm((current: any) => ({ ...current, ai_model: modelOptions[0]?.value ?? 'PPE' }));
+    }
+  }, [form.ai_model, modelOptions]);
 
   useEffect(() => {
     const trimmed = form.rtsp_url?.trim() || '';
@@ -385,7 +417,7 @@ const CamerasPage = () => {
     location: form.location.trim(),
     status: form.status,
     ai_model: form.ai_model,
-    site_id: isAdmin ? (form.site_id ? Number(form.site_id) : null) : assignedSiteId,
+    site_id: isSuperAdmin ? (form.site_id ? Number(form.site_id) : null) : assignedSiteId,
     edge_server_id: form.edge_server_id ? Number(form.edge_server_id) : null,
   });
 
@@ -475,7 +507,7 @@ const CamerasPage = () => {
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Camera Management</h1>
           <p className="text-slate-500 text-sm mt-1">
-            {isAdmin ? 'Configure RTSP streams and AI processing' : 'Manage cameras for your assigned site'}
+            {isSuperAdmin ? 'Configure RTSP streams and AI processing across all clients' : 'Manage cameras for your assigned site'}
           </p>
         </div>
         <div className="flex gap-2">
@@ -615,7 +647,7 @@ const CamerasPage = () => {
       </div>
 
       <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title="Add Camera">
-        <CamForm form={form} setForm={setForm} sites={sites} edgeServers={edgeServers} saving={saving} rtspTestStatus={rtspTestStatus} rtspTestMessage={rtspTestMessage} rtspTestUrl={rtspTestUrl} rtspTestEdgeServerId={rtspTestEdgeServerId} onTestRtsp={runFormRtspTest} onCancel={() => setShowAdd(false)} onSubmit={handleAdd} />
+        <CamForm form={form} setForm={setForm} sites={sites} edgeServers={edgeServers} saving={saving} rtspTestStatus={rtspTestStatus} rtspTestMessage={rtspTestMessage} rtspTestUrl={rtspTestUrl} rtspTestEdgeServerId={rtspTestEdgeServerId} onTestRtsp={runFormRtspTest} modelOptions={modelOptions} onCancel={() => setShowAdd(false)} onSubmit={handleAdd} />
       </Modal>
       <Modal isOpen={showView} onClose={() => setShowView(false)} title="Camera Details">
         {selected && (
@@ -638,7 +670,7 @@ const CamerasPage = () => {
         )}
       </Modal>
       <Modal isOpen={showEdit} onClose={() => setShowEdit(false)} title={`Edit: ${selected?.camera_name}`}>
-        <CamForm form={form} setForm={setForm} sites={sites} edgeServers={edgeServers} saving={saving} rtspTestStatus={rtspTestStatus} rtspTestMessage={rtspTestMessage} rtspTestUrl={rtspTestUrl} rtspTestEdgeServerId={rtspTestEdgeServerId} onTestRtsp={runFormRtspTest} onCancel={() => setShowEdit(false)} onSubmit={handleEdit} />
+        <CamForm form={form} setForm={setForm} sites={sites} edgeServers={edgeServers} saving={saving} rtspTestStatus={rtspTestStatus} rtspTestMessage={rtspTestMessage} rtspTestUrl={rtspTestUrl} rtspTestEdgeServerId={rtspTestEdgeServerId} onTestRtsp={runFormRtspTest} modelOptions={modelOptions} onCancel={() => setShowEdit(false)} onSubmit={handleEdit} />
       </Modal>
       <Modal isOpen={showDelete} onClose={() => setShowDelete(false)} title="Delete Camera" maxWidth="max-w-sm">
         <div className="text-center space-y-4">

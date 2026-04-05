@@ -7,6 +7,8 @@ import { usePermissions } from '../hooks/usePermissions';
 import { selectUsersWithOptionalSite } from '../lib/userQueries';
 import { resolveSnapshotUrl } from '../lib/snapshotUrl';
 import { Modal } from '../components/ui/Modal';
+import { getScopeSiteId, isAdminRole, isSuperAdminRole } from '../lib/roles';
+import { scopeSitesForActor, scopeUsersForActor } from '../lib/tenantScope';
 
 interface ViolationRecord {
   id: number;
@@ -72,9 +74,10 @@ const severityColor = (severity: string) => {
 
 const ViolationsPage = () => {
   const { appUser } = useAuth();
-  const isAdmin = appUser?.role === 'admin';
+  const isAdmin = isAdminRole(appUser?.role);
+  const isSuperAdmin = isSuperAdminRole(appUser?.role);
   const { canWrite, isReadOnly } = usePermissions();
-  const assignedSiteId = appUser?.site_id ?? null;
+  const assignedSiteId = getScopeSiteId(appUser);
   const [violations, setViolations] = useState<ViolationRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -99,7 +102,7 @@ const ViolationsPage = () => {
     setLoading(true);
     setError('');
 
-    if (!isAdmin && !assignedSiteId) {
+    if (!isSuperAdmin && !assignedSiteId) {
       setViolations([]);
       setLoading(false);
       return;
@@ -110,7 +113,7 @@ const ViolationsPage = () => {
       .select('id, timestamp, violation_type, status, image_path, cameras!inner(site_id, camera_name, location, sites(site_name)), employees(name)')
       .order('timestamp', { ascending: false });
 
-    if (!isAdmin && assignedSiteId) {
+    if (!isSuperAdmin && assignedSiteId) {
       query = query.eq('cameras.site_id', assignedSiteId);
     }
 
@@ -123,7 +126,7 @@ const ViolationsPage = () => {
     }
 
     setLoading(false);
-  }, [assignedSiteId, isAdmin]);
+  }, [assignedSiteId, isSuperAdmin]);
 
   useEffect(() => {
     fetchViolations();
@@ -132,15 +135,15 @@ const ViolationsPage = () => {
   useEffect(() => {
     const fetchSites = async () => {
       let query = supabase.from('sites').select('id, site_name').order('site_name');
-      if (!isAdmin && assignedSiteId) {
+      if (!isSuperAdmin && assignedSiteId) {
         query = query.eq('id', assignedSiteId);
       }
       const { data } = await query;
-      setSites((data as SiteRecord[]) ?? []);
+      setSites(scopeSitesForActor((data as SiteRecord[]) ?? [], appUser));
     };
 
     fetchSites();
-  }, [assignedSiteId, isAdmin]);
+  }, [assignedSiteId, isSuperAdmin]);
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -155,11 +158,11 @@ const ViolationsPage = () => {
         query => query.eq('is_deleted', false).order('name'),
       );
 
-      setUsers(((result.data as UserScope[] | null) ?? []).filter(user => !!user.site_id));
+      setUsers(scopeUsersForActor((result.data as UserScope[] | null) ?? [], appUser).filter(user => !!user.site_id));
     };
 
     fetchUsers();
-  }, [isAdmin]);
+  }, [appUser, isAdmin]);
 
   useEffect(() => {
     setFilter(initialFilter);
@@ -326,7 +329,7 @@ const ViolationsPage = () => {
         </div>
         {isAdmin && users.length > 0 && (
           <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm">
-            <span className="text-xs text-slate-400 uppercase tracking-wide">User</span>
+            <span className="text-xs text-slate-400 uppercase tracking-wide">Client</span>
             <select value={selectedUserId} onChange={event => handleUserChange(event.target.value)} className="text-slate-700 text-sm bg-transparent outline-none">
               <option value="">All</option>
               {users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}
@@ -335,7 +338,7 @@ const ViolationsPage = () => {
         )}
         {isAdmin && users.length === 0 && (
           <span className="text-xs text-amber-600 bg-amber-50 border border-amber-100 px-3 py-2 rounded-lg">
-            Assign a site to a user in Users before filtering by user.
+            Assign a client user to a site in Clients before filtering by client.
           </span>
         )}
       </div>

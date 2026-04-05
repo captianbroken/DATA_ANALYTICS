@@ -4,6 +4,8 @@ import { Plus, Search, Eye, Edit2, Trash2, MapPin, Wifi, WifiOff, RefreshCw } fr
 import { supabase } from '../lib/supabase';
 import { Modal, FormField, FormActions } from '../components/ui/Modal';
 import { useAuth } from '../hooks/useAuth';
+import { getScopeSiteId, isAdminRole, isSuperAdminRole } from '../lib/roles';
+import { scopeSitesForActor, scopeUsersForActor } from '../lib/tenantScope';
 
 interface Site {
   id: number;
@@ -29,8 +31,9 @@ const emptySite = { site_name: '', address: '', description: '', status: 'active
 
 const SitesPage = () => {
   const { appUser } = useAuth();
-  const isAdmin = appUser?.role === 'admin';
-  const assignedSiteId = appUser?.site_id ?? null;
+  const isAdmin = isAdminRole(appUser?.role);
+  const isSuperAdmin = isSuperAdminRole(appUser?.role);
+  const assignedSiteId = getScopeSiteId(appUser);
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -70,7 +73,7 @@ const SitesPage = () => {
     if (usersError && !sitesError) setError(usersError.message);
     setSiteAssignmentAvailable(true);
 
-    const nextUsers = ((userData as UserScope[] | null) ?? []).filter(user => !user.is_deleted);
+    const nextUsers = scopeUsersForActor((userData as UserScope[] | null) ?? [], appUser);
     setUsers(nextUsers);
 
     if (!sitesError && siteData) {
@@ -80,12 +83,12 @@ const SitesPage = () => {
         usersBySite.set(user.site_id, (usersBySite.get(user.site_id) ?? 0) + 1);
       });
 
-      const scopedSites = (siteData as Site[]).filter(site => isAdmin || site.id === assignedSiteId);
+      const scopedSites = scopeSitesForActor(siteData as Site[], appUser);
       setSites(scopedSites.map(site => ({ ...site, linked_users: usersBySite.get(site.id) ?? 0 })));
     }
 
     setLoading(false);
-  }, [assignedSiteId, isAdmin]);
+  }, [appUser, assignedSiteId, isAdmin, isSuperAdmin]);
 
   useEffect(() => {
     fetchSites();
@@ -224,9 +227,9 @@ const SitesPage = () => {
       <FormField label="Address" value={form.address} onChange={value => setForm(current => ({ ...current, address: value }))} placeholder="Full address" />
       <FormField label="Description" value={form.description} onChange={value => setForm(current => ({ ...current, description: value }))} placeholder="Optional description" />
       <FormField label="Status" value={form.status} onChange={value => setForm(current => ({ ...current, status: value }))} options={[{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }]} />
-      {isAdmin && (
+      {isSuperAdmin && (
         <FormField 
-          label="Link a User" 
+          label="Link a Client User" 
           value={form.user_id} 
           onChange={value => setForm(current => ({ ...current, user_id: value }))} 
           options={[
@@ -245,14 +248,14 @@ const SitesPage = () => {
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Sites Management</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {isAdmin ? 'Manage construction sites and facilities' : 'Your assigned site and facility details'}
+            {isSuperAdmin ? 'Manage all client sites and facilities' : 'Your assigned client/site details'}
           </p>
         </div>
         <div className="flex gap-2">
           <button onClick={fetchSites} className="rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50" title="Refresh">
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
           </button>
-          {isAdmin && (
+          {isSuperAdmin && (
             <button onClick={() => { setForm(emptySite); setError(''); setShowAdd(true); }} style={{ backgroundColor: '#005baa' }} className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90">
               <Plus size={16} /> Add Site
             </button>
@@ -282,7 +285,7 @@ const SitesPage = () => {
         </div>
         {isAdmin && users.length > 0 && (
           <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
-            <span className="text-xs uppercase tracking-wide text-slate-400">User</span>
+            <span className="text-xs uppercase tracking-wide text-slate-400">Client</span>
             <select
               value={selectedUserId}
               onChange={event => {
@@ -300,7 +303,7 @@ const SitesPage = () => {
         )}
         {isAdmin && users.length === 0 && (
           <span className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-600">
-            Assign a site to a user in Users before filtering by user.
+            Assign a client user to a site in Clients before filtering by client.
           </span>
         )}
         <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-500">{filtered.length} sites</span>
@@ -308,7 +311,7 @@ const SitesPage = () => {
 
       {isAdmin && !siteAssignmentAvailable && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-          User-to-site ownership is not available in the current database yet, so this page cannot show which users belong to this site.
+          Client-to-site ownership is not available in the current database yet, so this page cannot show which client users belong to this site.
         </div>
       )}
 
@@ -326,7 +329,7 @@ const SitesPage = () => {
             <thead className="border-b border-slate-100 bg-slate-50 text-xs text-slate-500">
               <tr>
                 <th className="px-5 py-3 font-medium">Site Name</th>
-                {isAdmin && <th className="px-5 py-3 text-center font-medium">Linked Users</th>}
+                {isAdmin && <th className="px-5 py-3 text-center font-medium">Linked Clients</th>}
                 <th className="px-5 py-3 font-medium">Address</th>
                 <th className="px-5 py-3 text-center font-medium">Status</th>
                 <th className="px-5 py-3 text-center font-medium">Created</th>
@@ -389,7 +392,7 @@ const SitesPage = () => {
                 { label: 'Status', value: selected.status ?? 'active' },
                 { label: 'Address', value: selected.address ?? '-' },
                 { label: 'Created', value: new Date(selected.created_at).toLocaleString() },
-                ...(isAdmin ? [{ label: 'Linked Users', value: String(selected.linked_users ?? 0) }] : []),
+                ...(isAdmin ? [{ label: 'Linked Clients', value: String(selected.linked_users ?? 0) }] : []),
               ].map(item => (
                 <div key={item.label} className="rounded-lg bg-slate-50 p-3">
                   <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">{item.label}</p>

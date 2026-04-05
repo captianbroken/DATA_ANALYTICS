@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase';
 import { FormActions, FormField, Modal } from '../components/ui/Modal';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../hooks/usePermissions';
+import { getScopeSiteId, isAdminRole, isSuperAdminRole } from '../lib/roles';
+import { scopeSitesForActor, scopeUsersForActor } from '../lib/tenantScope';
 
 interface SiteRecord {
   id: number;
@@ -47,9 +49,10 @@ const emptyForm = {
 
 const EdgeServersPage = () => {
   const { appUser } = useAuth();
-  const isAdmin = appUser?.role === 'admin';
+  const isAdmin = isAdminRole(appUser?.role);
+  const isSuperAdmin = isSuperAdminRole(appUser?.role);
   const { canWrite, isReadOnly } = usePermissions();
-  const assignedSiteId = appUser?.site_id ?? null;
+  const assignedSiteId = getScopeSiteId(appUser);
   const [servers, setServers] = useState<EdgeServerRecord[]>([]);
   const [sites, setSites] = useState<SiteRecord[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
@@ -70,7 +73,7 @@ const EdgeServersPage = () => {
     setLoading(true);
     setError('');
 
-    if (!isAdmin && !assignedSiteId) {
+    if (!isSuperAdmin && !assignedSiteId) {
       setServers([]);
       setSites([]);
       setUsers([]);
@@ -79,9 +82,9 @@ const EdgeServersPage = () => {
     }
 
     let cameraQuery = supabase.from('cameras').select('edge_server_id, site_id').eq('is_deleted', false);
-    const siteScope = isAdmin ? null : assignedSiteId;
+    const siteScope = isSuperAdmin ? null : assignedSiteId;
 
-    if (!isAdmin && assignedSiteId) {
+    if (!isSuperAdmin && assignedSiteId) {
       cameraQuery = cameraQuery.eq('site_id', assignedSiteId);
     }
 
@@ -107,7 +110,7 @@ const EdgeServersPage = () => {
       if (!camera.edge_server_id) return;
       counts.set(camera.edge_server_id, (counts.get(camera.edge_server_id) ?? 0) + 1);
     });
-    ((userData as UserOption[] | null) ?? []).filter(user => !user.is_deleted).forEach(user => {
+    scopeUsersForActor((userData as UserOption[] | null) ?? [], appUser).forEach(user => {
       if (!user.site_id) return;
       usersBySite.set(user.site_id, (usersBySite.get(user.site_id) ?? 0) + 1);
     });
@@ -123,12 +126,11 @@ const EdgeServersPage = () => {
     }
 
     if (siteData) {
-      const scopedSites = (siteData as SiteRecord[]).filter(site => isAdmin || site.id === assignedSiteId);
-      setSites(scopedSites);
+      setSites(scopeSitesForActor(siteData as SiteRecord[], appUser));
     }
-    setUsers((((userData as UserOption[] | null) ?? []).filter(user => !user.is_deleted)));
+    setUsers(scopeUsersForActor((userData as UserOption[] | null) ?? [], appUser));
     setLoading(false);
-  }, [assignedSiteId, isAdmin]);
+  }, [appUser, assignedSiteId, isSuperAdmin, isAdmin]);
 
   const getSiteName = (siteName?: string) => siteName || '-';
 
@@ -167,7 +169,7 @@ const EdgeServersPage = () => {
   };
 
   const buildPayload = () => ({
-    site_id: isAdmin ? (form.site_id ? Number(form.site_id) : null) : assignedSiteId,
+    site_id: isSuperAdmin ? (form.site_id ? Number(form.site_id) : null) : assignedSiteId,
     server_name: form.server_name.trim(),
     ip_address: form.ip_address.trim() || null,
     mac_address: form.mac_address.trim() || null,
@@ -357,7 +359,7 @@ const EdgeServersPage = () => {
         )}
         {isAdmin && users.length > 0 && (
           <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm">
-            <span className="text-xs text-slate-400 uppercase tracking-wide">User</span>
+            <span className="text-xs text-slate-400 uppercase tracking-wide">Client</span>
             <select value={selectedUserId} onChange={event => {
               const params = new URLSearchParams(searchParams);
               if (event.target.value) params.set('user', event.target.value);
@@ -371,7 +373,7 @@ const EdgeServersPage = () => {
         )}
         {isAdmin && users.length === 0 && (
           <span className="text-xs text-amber-600 bg-amber-50 border border-amber-100 px-3 py-2 rounded-lg">
-            Assign a site to a user in Users before filtering by user.
+            Assign a client user to a site in Clients before filtering by client.
           </span>
         )}
         <span className="text-xs text-slate-500 bg-slate-100 px-3 py-2 rounded-lg">{filtered.length} servers</span>
@@ -421,7 +423,7 @@ const EdgeServersPage = () => {
                   </div>
                   {isAdmin && (
                     <div className="bg-slate-50 rounded-lg p-3">
-                      <p className="text-slate-400 mb-1">User Access</p>
+                      <p className="text-slate-400 mb-1">Client Access</p>
                       <p className="font-bold text-slate-700">{server.linked_users ?? 0}</p>
                     </div>
                   )}
@@ -490,7 +492,7 @@ const EdgeServersPage = () => {
               ['MAC Address', selected.mac_address ?? '-'],
               ['Status', selected.status === 'active' ? 'Online' : 'Offline'],
               ['Connected Cameras', String(selected.camera_count ?? 0)],
-              ...(isAdmin ? [['Users With Access', String(selected.linked_users ?? 0)] as [string, string]] : []),
+              ...(isAdmin ? [['Clients With Access', String(selected.linked_users ?? 0)] as [string, string]] : []),
             ].map(([label, value]) => (
               <div key={label} className="bg-slate-50 p-3 rounded-lg">
                 <p className="text-xs text-slate-400 uppercase tracking-wide font-medium mb-1">{label}</p>

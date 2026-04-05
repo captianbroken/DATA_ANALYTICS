@@ -36,6 +36,8 @@ import {
 } from 'recharts';
 import { isSupabaseConfigured, supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
+import { getRoleLabel, getScopeSiteId, isAdminRole, isSuperAdminRole, type AppRole } from '../../lib/roles';
+import { scopeUsersForActor } from '../../lib/tenantScope';
 
 type TimeRange = '1D' | '7D' | '1M' | '6M' | '1Y' | 'Custom';
 
@@ -71,7 +73,7 @@ interface AdminUserPreview {
   name: string;
   email: string;
   status: string;
-  role_name?: 'admin' | 'user';
+  role_name?: AppRole;
   site_id?: number | null;
   last_login?: string | null;
 }
@@ -82,10 +84,6 @@ interface ActivityFeedItem {
   detail: string;
   kind: 'healthy' | 'warning' | 'danger';
 }
-
-const getRoleLabel = (roleName?: 'admin' | 'user') => {
-  return roleName === 'admin' ? 'Admin' : 'Account';
-};
 
 interface CountsState {
   sites: number;
@@ -340,8 +338,9 @@ const DashboardOverview = () => {
   const [searchParams] = useSearchParams();
   const normalizedQuery = useMemo(() => (searchParams.get('q') ?? '').trim().toLowerCase(), [searchParams]);
   const { appUser } = useAuth();
-  const isAdmin = appUser?.role === 'admin';
-  const assignedSiteId = appUser?.site_id ?? null;
+  const isAdmin = isAdminRole(appUser?.role);
+  const isSuperAdmin = isSuperAdminRole(appUser?.role);
+  const assignedSiteId = getScopeSiteId(appUser);
 
   const dateRange = useMemo(() => getDateRange(timeRange, customStart, customEnd), [timeRange, customStart, customEnd]);
   const startDate = useMemo(() => dateRange.start.toISOString(), [dateRange]);
@@ -446,6 +445,7 @@ const DashboardOverview = () => {
       })
       .slice(0, 5);
   }, [adminUsers]);
+  const shouldShowTenantOperations = !isSuperAdmin;
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -474,13 +474,13 @@ const DashboardOverview = () => {
       setLoading(true);
 
       try {
-        if (!isAdmin && !assignedSiteId) {
+        if (!isSuperAdmin && !assignedSiteId) {
           setCounts(emptyCounts);
           return;
         }
 
         const { data, error } = await supabase.rpc('get_dashboard_summary', {
-          p_site_id: isAdmin ? null : assignedSiteId,
+          p_site_id: isSuperAdmin ? null : assignedSiteId,
           p_start: startDate,
           p_end: endDate,
         });
@@ -516,7 +516,7 @@ const DashboardOverview = () => {
       setChartLoading(true);
 
       try {
-        if (!isAdmin && !assignedSiteId) {
+        if (!isSuperAdmin && !assignedSiteId) {
           setChartData(buildEmptyBuckets(timeRange, dateRange.start, dateRange.end));
           setRecentEvents([]);
           setRecentViolations([]);
@@ -529,12 +529,12 @@ const DashboardOverview = () => {
 
         const [{ data: eventsRaw, error: eventsError }, { data: violationsRaw, error: violationsError }] = await Promise.all([
           supabase.rpc('list_dashboard_events', {
-            p_site_id: isAdmin ? null : assignedSiteId,
+            p_site_id: isSuperAdmin ? null : assignedSiteId,
             p_start: startDate,
             p_end: endDate,
           }),
           supabase.rpc('list_dashboard_violations', {
-            p_site_id: isAdmin ? null : assignedSiteId,
+            p_site_id: isSuperAdmin ? null : assignedSiteId,
             p_start: startDate,
             p_end: endDate,
           }),
@@ -578,7 +578,7 @@ const DashboardOverview = () => {
       try {
         const { data, error } = await supabase.rpc('list_dashboard_users');
         if (error) throw error;
-        setAdminUsers(((data as AdminUserPreview[] | null) ?? []).filter(user => user?.id));
+        setAdminUsers(scopeUsersForActor(((data as AdminUserPreview[] | null) ?? []).filter(user => user?.id), appUser));
       } catch (error) {
         console.error('Dashboard user preview fetch failed:', error);
         setAdminUsers([]);
@@ -588,7 +588,7 @@ const DashboardOverview = () => {
     fetchStats();
     fetchCharts();
     fetchAdminUsers();
-  }, [assignedSiteId, dateRange, endDate, isAdmin, modelFilter, refreshTick, startDate, timeRange]);
+  }, [appUser, assignedSiteId, dateRange, endDate, isAdmin, isSuperAdmin, modelFilter, refreshTick, startDate, timeRange]);
 
   const handleExport = () => {
     const data = [
@@ -634,7 +634,7 @@ const DashboardOverview = () => {
     <div className="space-y-6" onClick={() => setShowDropdown(false)}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="page-section px-5 py-4 sm:px-6 sm:py-4 flex-1">
-          <h1 className="page-title text-xl sm:text-2xl">{isAdmin ? 'System Dashboard' : 'Site Dashboard'}</h1>
+          <h1 className="page-title text-xl sm:text-2xl">{isSuperAdmin ? 'Platform Dashboard' : 'Site Dashboard'}</h1>
         </div>
         <div className="flex items-center gap-3 flex-wrap" onClick={event => event.stopPropagation()}>
           <div className="relative">
@@ -685,15 +685,24 @@ const DashboardOverview = () => {
       </div>
 
       <div>
-        <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-[0.28em] mb-3">System Overview</h2>
+        <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-[0.28em] mb-3">
+          {isSuperAdmin ? 'Platform Overview' : 'System Overview'}
+        </h2>
         <div className={`grid grid-cols-1 sm:grid-cols-2 ${isAdmin ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-4`}>
           <NavCard title="Total Sites" value={counts.sites} loading={loading} icon={Building2} color="bg-blue-500" to="/sites" />
           {isAdmin && (
-            <NavCard title="Total Users" value={counts.users} loading={loading} icon={Users} color="bg-indigo-500" to="/users" />
+            <NavCard title="Total Clients" value={counts.users} loading={loading} icon={Users} color="bg-indigo-500" to="/users" />
           )}
           <NavCard title="Total Cameras" value={counts.cameras} loading={loading} icon={Camera} color="bg-indigo-500" to="/cameras" />
           <NavCard title="Edge Servers" value={counts.edge_servers} loading={loading} icon={Server} color="bg-sky-500" to="/edge-servers" />
-          <NavCard title="Employees" value={counts.employees} loading={loading} icon={Users} color="bg-emerald-500" to="/employees" />
+          <NavCard
+            title={isSuperAdmin ? 'Client Admins' : 'Employees'}
+            value={isSuperAdmin ? adminUsers.filter(user => user.role_name === 'admin').length : counts.employees}
+            loading={loading}
+            icon={Users}
+            color="bg-emerald-500"
+            to={isSuperAdmin ? '/users' : '/employees'}
+          />
         </div>
       </div>
 
@@ -707,6 +716,7 @@ const DashboardOverview = () => {
         </div>
       </div>
 
+      {shouldShowTenantOperations && (
       <div>
         <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-[0.28em] mb-3">AI Activity</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -717,6 +727,7 @@ const DashboardOverview = () => {
           <NavCard title="PPE Violations" value={counts.ppe_violations} loading={loading} icon={ShieldAlert} color="bg-red-500" to="/violations?status=open" badge={counts.ppe_violations > 0 ? { label: 'Action Needed', type: 'danger' } : undefined} />
         </div>
       </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="data-card p-5 rounded-2xl lg:col-span-2">
@@ -801,6 +812,7 @@ const DashboardOverview = () => {
         </div>
       </div>
 
+      {shouldShowTenantOperations && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="data-card p-5 rounded-2xl">
           <div className="flex items-center justify-between mb-1">
@@ -868,6 +880,7 @@ const DashboardOverview = () => {
           )}
         </div>
       </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="table-shell rounded-2xl overflow-hidden">
@@ -994,7 +1007,7 @@ const DashboardOverview = () => {
 
               <div className="grid grid-cols-2 gap-3 mt-5">
                 <div className="rounded-2xl bg-white/5 border border-white/8 p-4">
-                  <p className="text-xs uppercase tracking-wide text-slate-400">Total Accounts</p>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Total Clients</p>
                   <p className="text-2xl font-bold text-white mt-2">{counts.users}</p>
                 </div>
                 <div className="rounded-2xl bg-white/5 border border-white/8 p-4">
@@ -1002,11 +1015,11 @@ const DashboardOverview = () => {
                   <p className="text-2xl font-bold text-white mt-2">{adminUsers.filter(user => user.role_name === 'admin').length}</p>
                 </div>
                 <div className="rounded-2xl bg-white/5 border border-white/8 p-4">
-                  <p className="text-xs uppercase tracking-wide text-slate-400">Active Accounts</p>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Active Clients</p>
                   <p className="text-2xl font-bold text-white mt-2">{adminUsers.filter(user => user.status === 'active').length}</p>
                 </div>
                 <div className="rounded-2xl bg-white/5 border border-white/8 p-4">
-                  <p className="text-xs uppercase tracking-wide text-slate-400">Inactive Accounts</p>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Inactive Clients</p>
                   <p className="text-2xl font-bold text-white mt-2">{adminUsers.filter(user => user.status === 'inactive').length}</p>
                 </div>
               </div>
@@ -1018,7 +1031,7 @@ const DashboardOverview = () => {
                   className="px-4 py-2.5 rounded-xl text-sm font-medium text-white"
                   style={{ backgroundColor: '#005baa' }}
                 >
-                  Open Account Management
+                  Open Client Management
                 </button>
               </div>
             </div>
@@ -1026,8 +1039,8 @@ const DashboardOverview = () => {
             <div className="table-shell rounded-2xl overflow-hidden">
               <div className="px-5 py-4 border-b border-white/8 flex items-center justify-between">
                 <div>
-                  <h3 className="font-bold text-white">Account Directory</h3>
-                  <p className="text-xs text-slate-400 mt-1">Click any account to inspect dashboard scope and access</p>
+                  <h3 className="font-bold text-white">Client Directory</h3>
+                  <p className="text-xs text-slate-400 mt-1">Click any client to inspect dashboard scope and access</p>
                 </div>
                 <button
                   type="button"
@@ -1038,9 +1051,9 @@ const DashboardOverview = () => {
                 </button>
               </div>
               {loading ? (
-                <div className="p-8 text-center text-slate-400 animate-pulse text-sm">Loading users...</div>
+                <div className="p-8 text-center text-slate-400 animate-pulse text-sm">Loading clients...</div>
               ) : adminUserPreview.length === 0 ? (
-                <div className="p-8 text-center text-slate-400 text-sm">No accounts available yet.</div>
+                <div className="p-8 text-center text-slate-400 text-sm">No clients available yet.</div>
               ) : (
                 <div className="divide-y divide-white/6">
                   {adminUserPreview.map(user => (

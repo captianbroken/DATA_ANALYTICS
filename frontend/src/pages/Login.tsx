@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, Lock, Mail, Eye, EyeOff, Shield, Camera, Cpu, AlertTriangle } from 'lucide-react';
 import { HypersparkWordmark } from '../components/brand/HypersparkBrand';
+import { toFriendlyErrorMessage } from '../lib/friendlyErrors';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
+import { useAuth } from '../hooks/useAuth';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -12,6 +14,7 @@ const Login = () => {
   const [debugInfo, setDebugInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { setAuthSession } = useAuth();
   const features = [
     {
       icon: Camera,
@@ -34,26 +37,6 @@ const Login = () => {
       copy: 'Support distributed monitoring environments with resilient infrastructure and low-latency processing.',
     },
   ];
-
-  const toFriendlyError = (err: any) => {
-    const message = err?.message || '';
-    const code = err?.code || '';
-    const details = err?.details || '';
-    const hint = err?.hint || '';
-
-    if (code === 'PGRST200' || /schema cache|schema/i.test(message)) {
-      return 'Database schema not ready or not applied to this Supabase project. Run schema.sql and dashboard_migration.sql on the same project as VITE_SUPABASE_URL, then retry.';
-    }
-
-    if (code === '42501' || /permission denied/i.test(message)) {
-      return 'Database permission error. Apply dashboard_migration.sql grants (or RLS policies) and retry.';
-    }
-
-    const extra = [details, hint].filter(Boolean).join(' ');
-    if (code && extra) return `${message} (code: ${code}) ${extra}`;
-    if (code) return `${message} (code: ${code})`;
-    return message || 'Login failed. Check your credentials.';
-  };
 
   const captureDebugInfo = (err: any) => {
     try {
@@ -120,7 +103,7 @@ const Login = () => {
         .update({ last_login: new Date().toISOString() })
         .eq('id', appUser.id);
 
-      localStorage.setItem('hyperspark_session', JSON.stringify({
+      setAuthSession({
         user: { email: appUser.email },
         created_at: new Date().toISOString(),
         app_user: {
@@ -129,9 +112,10 @@ const Login = () => {
           name: appUser.name,
           role: appUser.role,
           site_id: appUser.site_id ?? null,
+          access_level: appUser.access_level ?? 'full_access',
           status: appUser.status,
         },
-      }));
+      });
       
       navigate('/', { replace: true });
     } catch (err: any) {
@@ -142,7 +126,7 @@ const Login = () => {
       if (!isAuthUnavailableError(err)) {
         await supabase.auth.signOut();
       }
-      setError(toFriendlyError(err));
+      setError(toFriendlyErrorMessage(err, 'login'));
       captureDebugInfo(err);
       console.error('Login error:', err);
     } finally {
