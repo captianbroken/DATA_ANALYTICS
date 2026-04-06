@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Activity,
@@ -149,19 +149,25 @@ const getDateRange = (range: TimeRange, customStart?: string, customEnd?: string
   }
 
   if (range === '1M') {
-    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const date = new Date(now);
+    date.setDate(date.getDate() - 29);
+    start = toStartOfDay(date);
     return { start, end };
   }
 
   if (range === '6M') {
-    const date = new Date(now.getFullYear(), now.getMonth(), 1);
-    date.setMonth(date.getMonth() - 5);
-    start = date;
+    const date = new Date(now);
+    date.setMonth(date.getMonth() - 6);
+    date.setDate(date.getDate() + 1);
+    start = toStartOfDay(date);
     return { start, end };
   }
 
   if (range === '1Y') {
-    start = new Date(now.getFullYear(), 0, 1);
+    const date = new Date(now);
+    date.setFullYear(date.getFullYear() - 1);
+    date.setDate(date.getDate() + 1);
+    start = toStartOfDay(date);
     return { start, end };
   }
 
@@ -337,10 +343,13 @@ const DashboardOverview = () => {
   const todayInputMax = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const [searchParams] = useSearchParams();
   const normalizedQuery = useMemo(() => (searchParams.get('q') ?? '').trim().toLowerCase(), [searchParams]);
-  const { appUser } = useAuth();
+  const { appUser, loading: authLoading } = useAuth();
   const isAdmin = isAdminRole(appUser?.role);
   const isSuperAdmin = isSuperAdminRole(appUser?.role);
   const assignedSiteId = getScopeSiteId(appUser);
+  const requestSequenceRef = useRef(0);
+  const hasLoadedCountsRef = useRef(false);
+  const hasLoadedChartsRef = useRef(false);
 
   const dateRange = useMemo(() => getDateRange(timeRange, customStart, customEnd), [timeRange, customStart, customEnd]);
   const startDate = useMemo(() => dateRange.start.toISOString(), [dateRange]);
@@ -470,11 +479,23 @@ const DashboardOverview = () => {
       return;
     }
 
+    if (authLoading) {
+      setLoading(true);
+      setChartLoading(true);
+      return;
+    }
+
+    requestSequenceRef.current += 1;
+    const requestSequence = requestSequenceRef.current;
+    let active = true;
+    const isCurrentRequest = () => active && requestSequence === requestSequenceRef.current;
+
     const fetchStats = async () => {
       setLoading(true);
 
       try {
         if (!isSuperAdmin && !assignedSiteId) {
+          if (!isCurrentRequest()) return;
           setCounts(emptyCounts);
           return;
         }
@@ -486,6 +507,7 @@ const DashboardOverview = () => {
         });
 
         if (error) throw error;
+        if (!isCurrentRequest()) return;
 
         const summary = Array.isArray(data) ? data[0] : data;
         setCounts({
@@ -504,10 +526,15 @@ const DashboardOverview = () => {
           ppe_detections: Number(summary?.ppe_detections ?? 0),
           ppe_violations: Number(summary?.ppe_violations ?? 0),
         });
+        hasLoadedCountsRef.current = true;
       } catch (error) {
         console.error('Dashboard stats fetch failed:', error);
-        setCounts(emptyCounts);
+        if (!isCurrentRequest()) return;
+        if (!hasLoadedCountsRef.current) {
+          setCounts(emptyCounts);
+        }
       } finally {
+        if (!isCurrentRequest()) return;
         setLoading(false);
       }
     };
@@ -517,6 +544,7 @@ const DashboardOverview = () => {
 
       try {
         if (!isSuperAdmin && !assignedSiteId) {
+          if (!isCurrentRequest()) return;
           setChartData(buildEmptyBuckets(timeRange, dateRange.start, dateRange.end));
           setRecentEvents([]);
           setRecentViolations([]);
@@ -542,6 +570,7 @@ const DashboardOverview = () => {
 
         if (eventsError) throw eventsError;
         if (violationsError) throw violationsError;
+        if (!isCurrentRequest()) return;
 
         (eventsRaw ?? []).forEach((event: { event_time: string; event_type?: string | null }) => {
           const key = getTimeKey(event.event_time, timeRange);
@@ -559,12 +588,17 @@ const DashboardOverview = () => {
         setChartData(buckets.map(bucket => bucketMap[bucket.time]));
         setRecentEvents((((eventsRaw as unknown) as RecentEvent[]) ?? []).slice(0, 8));
         setRecentViolations((((violationsRaw as unknown) as ViolationRecord[]) ?? []).slice(0, 8));
+        hasLoadedChartsRef.current = true;
       } catch (error) {
         console.error('Dashboard chart fetch failed:', error);
-        setChartData(buildEmptyBuckets(timeRange, dateRange.start, dateRange.end));
-        setRecentEvents([]);
-        setRecentViolations([]);
+        if (!isCurrentRequest()) return;
+        if (!hasLoadedChartsRef.current) {
+          setChartData(buildEmptyBuckets(timeRange, dateRange.start, dateRange.end));
+          setRecentEvents([]);
+          setRecentViolations([]);
+        }
       } finally {
+        if (!isCurrentRequest()) return;
         setChartLoading(false);
       }
     };
@@ -578,9 +612,11 @@ const DashboardOverview = () => {
       try {
         const { data, error } = await supabase.rpc('list_dashboard_users');
         if (error) throw error;
+        if (!isCurrentRequest()) return;
         setAdminUsers(scopeUsersForActor(((data as AdminUserPreview[] | null) ?? []).filter(user => user?.id), appUser));
       } catch (error) {
         console.error('Dashboard user preview fetch failed:', error);
+        if (!isCurrentRequest()) return;
         setAdminUsers([]);
       }
     };
@@ -588,7 +624,11 @@ const DashboardOverview = () => {
     fetchStats();
     fetchCharts();
     fetchAdminUsers();
-  }, [appUser, assignedSiteId, dateRange, endDate, isAdmin, isSuperAdmin, modelFilter, refreshTick, startDate, timeRange]);
+
+    return () => {
+      active = false;
+    };
+  }, [appUser, assignedSiteId, authLoading, dateRange, endDate, isAdmin, isSuperAdmin, modelFilter, refreshTick, startDate, timeRange]);
 
   const handleExport = () => {
     const data = [

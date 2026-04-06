@@ -137,7 +137,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (!active) return;
         setSession(stored);
         setAppUser(stored.app_user);
-        setLoading(false);
       }
 
       const nextUser = await loadAppUser(stored.user.email);
@@ -145,6 +144,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       if (!nextUser) {
         if (stored.app_user?.email && stored.app_user.id) {
+          setLoading(false);
           return;
         }
 
